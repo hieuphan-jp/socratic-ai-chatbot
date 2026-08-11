@@ -8,7 +8,9 @@
  */
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 
+import { HintChatPage } from '@/pages/HintChatPage'
 import { HomePage } from '@/pages/HomePage'
+import { LearningTreePage } from '@/pages/LearningTreePage'
 import { LoginPage } from '@/pages/LoginPage'
 
 import { RequireAuth } from './RequireAuth'
@@ -20,6 +22,22 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <HomePage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/learning-tree',
+    element: (
+      <RequireAuth>
+        <LearningTreePage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/hint-chat',
+    element: (
+      <RequireAuth>
+        <HintChatPage />
       </RequireAuth>
     ),
   },
