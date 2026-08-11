@@ -51,6 +51,7 @@ export const chatApi = {
     if (lower.includes('cách khác') || lower.includes('別のアプローチ')) {
       localTree.push({
         id: `node-${Date.now()}`,
+        step_number: localTree.length + 1,
         label: '分岐: 別の解法アプローチ / Nhánh: Phương pháp tiếp cận khác',
         parentId: 'node-1',
       })

@@ -56,10 +56,12 @@ export const initialMockMessages: ChatMessage[] = [
 export const initialMockTree: StepNode[] = [
   {
     id: 'node-1',
+    step_number: 1,
     label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán',
   },
   {
     id: 'node-2',
+    step_number: 2,
     label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp giải',
     parentId: 'node-1',
   },
