@@ -1,0 +1,5 @@
+# local.txt
+# JA: ローカル開発用。base を継承し、開発ツール（lint 等）を追加する。
+# VI: Dùng cho phát triển cục bộ. Kế thừa base và thêm công cụ dev (lint...).
+-r base.txt
+ruff~=0.14

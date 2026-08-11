@@ -1,0 +1,34 @@
+# .gitignore
+# JA: 生成物・秘密・環境依存物は追跡しない。VI: Không theo dõi file sinh ra, secret, phụ thuộc môi trường.
+
+# --- Python / Django ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.venv/
+venv/
+myvenv/
+env/
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+
+# --- 環境変数 / Biến môi trường ---
+.env
+.env.*
+!.env.example
+
+# --- Node / Vite ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# --- エディタ・OS / Editor & OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,18 @@
+# ruff.toml
+# JA: Python の lint 設定。5人の書き方を機械的に揃えるための最低限のルール。
+#     import 並び順(I)も見る。CI で `ruff check` と `ruff format --check` を回す。
+# VI: Cấu hình lint Python. Quy tắc tối thiểu để đồng nhất cách viết của 5 người một cách cơ học.
+#     Kiểm cả thứ tự import (I). CI chạy `ruff check` và `ruff format --check`.
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+# JA: E501(行長)は無効化。コメントを日本語+ベトナム語の2言語で書くため行が長くなりがちで、
+#     コードの折り返しは `ruff format` が担うので lint では長さを問わない。
+# VI: Tắt E501 (độ dài dòng). Vì comment viết 2 ngôn ngữ (Nhật + Việt) nên dòng thường dài;
+#     việc ngắt dòng của code do `ruff format` lo, nên lint không xét độ dài.
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["apps", "config"]

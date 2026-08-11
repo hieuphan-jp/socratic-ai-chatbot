@@ -1,0 +1,7 @@
+# base.txt
+# JA: 全環境で共通する依存。local / production はこれを -r で継承する。
+# VI: Phụ thuộc dùng chung cho mọi môi trường. local / production kế thừa qua -r.
+Django~=5.2
+djangorestframework~=3.16
+django-cors-headers~=4.9
+python-dotenv~=1.0
