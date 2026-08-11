@@ -8,7 +8,7 @@
  *     Chỉ hiển thị user hiện tại và nút đăng xuất để kiểm tra xác thực. Nội dung tính năng do
  *     mỗi người tạo trong features/ rồi thêm vào pages/ và app/router.tsx (xem CONVENTIONS.md §5).
  */
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { useLogout, useMe } from '@/features/auth/api/hooks'
 import { Button, Notice } from '@/shared/ui'
@@ -30,6 +30,10 @@ export function HomePage() {
         </div>
       </header>
       {/* JA: ここから各機能を追加する / VI: Thêm các tính năng từ đây */}
+      <nav style={{ display: 'flex', gap: 12 }}>
+        <Link to="/learning-tree">学習内容ツリー / Cây nội dung</Link>
+        <Link to="/hint-chat">ヒントチャット / Chat gợi ý</Link>
+      </nav>
       <Notice>
         ここに各自の機能を追加します（features/ を作成 → pages/ で組み立て → router に追加）。
         / Thêm tính năng của bạn tại đây (tạo features/ → lắp ở pages/ → thêm vào router).
