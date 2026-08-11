@@ -57,12 +57,10 @@ export const initialMockTree: StepNode[] = [
   {
     id: 'node-1',
     label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán',
-    status: 'COMPLETED',
   },
   {
     id: 'node-2',
     label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp giải',
-    status: 'CURRENT',
     parentId: 'node-1',
   },
 ]

@@ -52,7 +52,6 @@ export const chatApi = {
       localTree.push({
         id: `node-${Date.now()}`,
         label: '分岐: 別の解法アプローチ / Nhánh: Phương pháp tiếp cận khác',
-        status: 'REVISED',
         parentId: 'node-1',
       })
     }
