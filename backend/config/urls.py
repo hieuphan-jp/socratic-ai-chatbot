@@ -19,4 +19,5 @@ urlpatterns = [
     # JA: 各機能アプリの urls はここに1行ずつ include する（手順は CONVENTIONS.md §4）。
     # VI: urls của từng app tính năng include tại đây, mỗi app 1 dòng (xem CONVENTIONS.md §4).
     path("api/", include("apps.chat.urls")),
+    path("api/", include("apps.topics.urls")),
 ]
