@@ -19,6 +19,7 @@ from django.utils import timezone
 from apps.ai.base import ChatMessage
 from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
+from apps.topics import services as topics_services
 from apps.topics.models import KnowledgeNode
 
 from .models import ReviewSchedule
@@ -210,8 +211,11 @@ def generate_similar_problem(source_node: KnowledgeNode) -> KnowledgeNode:
     title = lines[0].strip() if lines else f"{source_node.title}(類題)"
     content = "\n".join(lines[1:]).strip() or result.text.strip()
 
-    return KnowledgeNode.objects.create(
-        topic=source_node.topic,
+    # JA: KnowledgeNodeの構造への書き込みは topics アプリの責務なので、
+    #     直接 create せず services 経由で依頼する。
+    # VI: Ghi vào cấu trúc KnowledgeNode là trách nhiệm của app topics, nên
+    #     không create trực tiếp mà nhờ qua services của app đó.
+    return topics_services.create_derived_node(
         origin_node=source_node,
         title=title,
         content=content,

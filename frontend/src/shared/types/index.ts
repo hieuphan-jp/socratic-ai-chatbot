@@ -84,10 +84,15 @@ export type GraphData = {
   childrenIds?: string[]   // JA: 子ステップID群 / VI: Danh sách ID bước con (nếu có chia nhánh)
 }
 
-// JA: 学習内容ツリーのノード（バックエンドのシリアライザ出力に合わせて更新すること）。
-// VI: Node cây nội dung đã học (cần cập nhật khớp output serializer backend sau này).
+// JA: 学習内容ツリーのノード。GET /api/learning-tree/ と対応。
+//     type で「棚(topic)」か「本(knowledge_node)」かを区別する
+//     （knowledge_node のみ復習開始(node_id)の対象にできる）。
+// VI: Node cây nội dung đã học, tương ứng GET /api/learning-tree/.
+//     type phân biệt "kệ" (topic) hay "sách" (knowledge_node)
+//     (chỉ knowledge_node mới dùng để bắt đầu ôn tập qua node_id).
 export type TreeNode = {
   id: string
   label: string
+  type: 'topic' | 'knowledge_node'
   children?: TreeNode[]
 }
