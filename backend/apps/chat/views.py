@@ -34,7 +34,7 @@ class ChatSessionViewSet(
     @action(detail=True, methods=["post"], url_path="send-message")
     def send_message(self, request, pk=None):
         """JA: メッセージ送信エンドポイント / VI: Endpoint gửi tin nhắn"""
-        session = self.get_object()
+        session = self.get_object()  # JA: 所有権チェック自動適用 / VI: Tự động lọc qua get_queryset
         input_serializer = SendMessageInputSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
 
@@ -67,11 +67,3 @@ class ChatSessionViewSet(
         session = self.get_object()
         graph_data = services.get_session_graph_data(session=session)
         return Response(graph_data, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["get"], url_path="messages")
-    def get_messages(self, request, pk=None):
-        """JA: 過去メッセージ一覧取得エンドポイント / VI: Endpoint lấy danh sách tin nhắn cũ"""
-        session = self.get_object()
-        chat_messages = session.messages.all().order_by("created_at")
-        serializer = ChatMessageSerializer(chat_messages, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)

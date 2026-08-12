@@ -1,3 +1,9 @@
+/**
+ * features/hintChat/components/HintChatView.tsx
+ *
+ * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント。
+ * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy.
+ */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -27,13 +33,14 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   const [inputText, setInputText] = useState('');
   const [showTree, setShowTree] = useState(true);
 
+  // JA: 親コンポーネントからのアクティブセッションID変更を監視 / VI: Đồng bộ session ID khi props thay đổi
   useEffect(() => {
     if (propSessionId) {
       setCurrentSessionId(propSessionId);
     }
   }, [propSessionId]);
 
-  // Mutation: Tạo Session mới
+  // JA: 新しいチャットセッションを作成するミューテーション / VI: Mutation tạo phiên chat mới
   const createSessionMutation = useMutation({
     mutationFn: (title?: string) => chatApi.createSession(title || 'Hint Chat Session'),
     onSuccess: (newSession: any) => {
@@ -46,7 +53,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     },
   });
 
-  // 1. Fetch tin nhắn
+  // JA: 1. 現在のセッションのメッセージ一覧を取得 / VI: 1. Fetch danh sách tin nhắn của session hiện tại
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery<ChatMessage[]>({
     queryKey: ['chatMessages', currentSessionId],
     queryFn: async () => {
@@ -57,17 +64,19 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     enabled: !!currentSessionId,
   });
 
-  // 2. Build Nodes & Edges cho React Flow
+  // JA: 2. React Flow用のノードとエッジを生成（思考ツリー） / VI: 2. Tạo Node & Edge cho Sơ đồ tư duy (React Flow)
   const { nodes, edges } = useMemo(() => {
     const generatedNodes: Node[] = [];
     const generatedEdges: Edge[] = [];
 
+    // JA: ユーザーの質問のみを抽出してステップ化 / VI: Lọc tin nhắn USER làm các bước suy luận
     const userMsgs = messages.filter((msg: any) => {
       const sender = (msg.sender || msg.node_type || msg.sender_type || '').toUpperCase();
       return sender === 'USER' || sender === 'HUMAN';
     });
 
     if (userMsgs.length === 0) {
+      // JA: 初期状態のデモ用ノード / VI: Node demo khi chưa có tin nhắn
       generatedNodes.push(
         {
           id: 'step-1',
@@ -148,7 +157,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     return { nodes: generatedNodes, edges: generatedEdges };
   }, [messages]);
 
-  // Mutation: Gửi tin nhắn
+  // JA: メッセージ送信ミューテーション / VI: Mutation gửi tin nhắn
   const sendMessageMutation = useMutation({
     mutationFn: ({
       sessionId,
@@ -158,6 +167,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       payload: { message_text: string; action_type: 'ANSWER' | 'CHANGE_METHOD' };
     }) => chatApi.sendMessage(sessionId, payload),
     onSuccess: (data: any) => {
+      // JA: キャッシュを直接更新して即座に画面へ反映 / VI: Cập nhật trực tiếp cache để UI phản hồi tức thì
       queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
         const newData = oldData ? [...oldData] : [];
         if (data.user_message) newData.push(data.user_message);
@@ -168,11 +178,13 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     },
   });
 
+  // JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     let targetSessionId = currentSessionId;
 
+    // JA: セッションが存在しない場合、自動的に新規作成 / VI: Tự động khởi tạo session nếu chưa có
     if (!targetSessionId) {
       try {
         const newSession: any = await createSessionMutation.mutateAsync('Hint Chat Session');
@@ -207,7 +219,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   return (
     <div style={{ width: '100%', fontFamily: 'sans-serif', color: '#333', boxSizing: 'border-box' }}>
       
-      {/* Nút Toggle Ẩn/Hiện cây tư duy */}
+      {/* JA: 思考ツリー表示切り替えボタン / VI: Nút Toggle Ẩn/Hiện Sơ đồ tư duy */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
           Hint Chat Session / Phiên gợi ý
@@ -227,10 +239,10 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         </button>
       </div>
 
-      {/* Khung chứa 2 Cột mở rộng chiều ngang */}
+      {/* JA: チャット領域と思考ツリー領域のコンテナ / VI: Container chứa Cột Chat & Cột Sơ đồ tư duy */}
       <div style={{ display: 'flex', gap: '16px', width: '100%', marginBottom: '16px' }}>
         
-        {/* CỘT TRÁI: Khung Chat */}
+        {/* JA: 左カラム：チャット表示エリア / VI: CỘT TRÁI: Khung hiển thị chat */}
         <div
           style={{
             flex: 1.2,
@@ -306,7 +318,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           </div>
         </div>
 
-        {/* CỘT PHẢI: Sơ đồ tư duy React Flow */}
+        {/* JA: 右カラム：思考プロセスツリー（React Flow） / VI: CỘT PHẢI: Sơ đồ tư duy (React Flow) */}
         {showTree && (
           <div
             style={{
@@ -335,7 +347,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         )}
       </div>
 
-      {/* Form Nhập liệu rộng tràn toàn bộ cạnh dưới */}
+      {/* JA: メッセージ入力フォーム / VI: Form nhập liệu tin nhắn */}
       <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
         <input
           type="text"
