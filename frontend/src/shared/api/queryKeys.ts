@@ -16,4 +16,11 @@ export const queryKeys = {
   //     items: { all: ['items'] as const, list: () => [...queryKeys.items.all, 'list'] as const },
   // VI: Thêm nhóm key của từng tính năng ở đây. Ví dụ (xem CONVENTIONS.md §5):
   //     items: { all: ['items'] as const, list: () => [...queryKeys.items.all, 'list'] as const },
+  // JA: チャット機能のクエリキー。 VI: Key cho tính năng Chat và Cây tư duy.
+  chat: {
+    all: ['chat'] as const,
+    session: (attemptId: string) => [...queryKeys.chat.all, 'session', attemptId] as const,
+    messages: (sessionId: string) => [...queryKeys.chat.all, 'messages', sessionId] as const,
+    tree: (sessionId: string) => [...queryKeys.chat.all, 'tree', sessionId] as const,
+  },
 }
