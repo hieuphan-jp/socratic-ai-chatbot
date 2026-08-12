@@ -115,7 +115,7 @@ export function HintChatView() {
 
   // JA: 思考ツリーの状態管理と表示フラグ / VI: Quản lý state cây tư duy và flag ẩn/hiện
   const [treeNodes, setTreeNodes] = useState<StepNode[]>(initialMockTree)
-  const [showTree, setShowTree] = useState(false)
+  const [showTree, setShowTree] = useState(true)
 
   function handleSend() {
     const text = draft.trim()
@@ -141,6 +141,7 @@ export function HintChatView() {
           id: `step-${prev.length + 1}`,
           step_number: prev.length + 1,
           label: text,
+          parentId: prev.length > 0 ? prev[prev.length - 1].id : undefined,
         },
       ])
 
