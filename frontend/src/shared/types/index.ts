@@ -41,6 +41,14 @@ export type ChatSession = {
   created_at: string
 }
 
+export type StepNode = {
+  id: string
+  step_number: number
+  label: string
+  parentId?: string
+  childrenIds?: string[]
+}
+
 // JA: メッセージ送信ペイロード。SendMessageInputSerializer と対応。
 // VI: Payload gửi tin nhắn, tương ứng SendMessageInputSerializer backend.
 export type SendMessagePayload = {
