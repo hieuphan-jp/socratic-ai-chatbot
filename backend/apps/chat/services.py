@@ -47,6 +47,13 @@ def get_session_graph_data(*, session: ChatSession) -> dict:
             )
 
     return {"nodes": nodes, "edges": edges}
+class MessageObject:
+    def __init__(self, role: str, content: str):
+        self.role = role
+        self.content = content
+
+    def __getitem__(self, item):
+        return getattr(self, item)
 
 
 def send_message_and_get_ai_response(
@@ -80,21 +87,36 @@ def send_message_and_get_ai_response(
         node_type=user_node_type,
     )
 
-    # 3. Lấy LLM provider qua get_llm() và tạo câu trả lời
+    # 3. Lấy LLM provider và tạo phản hồi
     llm = get_llm()
-    prompt = f"System Instruction: {SYSTEM_PROMPT}\n\nUser Message: {text}\nAction: {action_type}"
+
+    # Tạo danh sách tin nhắn tương thích cả dạng Object (.role) lẫn Dict (['role'])
+    messages_payload = [
+        MessageObject("system", SYSTEM_PROMPT),
+        MessageObject("user", f"Action: {action_type}\nMessage: {text}"),
+    ]
 
     try:
-        # Kiểm tra phương thức khả dụng trên LLM Provider
-        if hasattr(llm, "generate_text"):
-            ai_text = llm.generate_text(prompt)
-        elif hasattr(llm, "chat"):
-            # Truyền chuỗi prompt trực tiếp cho phương thức chat
-            ai_text = llm.chat(prompt)
+        if hasattr(llm, "chat"):
+            ai_text = llm.chat(messages_payload)
+        elif hasattr(llm, "generate_text"):
+            prompt_str = f"System: {SYSTEM_PROMPT}\nUser: {text}"
+            ai_text = llm.generate_text(prompt_str)
+        elif hasattr(llm, "invoke"):
+            response = llm.invoke(messages_payload)
+            ai_text = getattr(response, "content", str(response))
         else:
             ai_text = f"[AI Tutor] Nhận xét câu trả lời '{text}': Hướng đi rất tốt, hãy làm tiếp bước sau!"
     except Exception as e:
-        ai_text = f"[AI Tutor] Hướng đi của bạn rất đúng! (Error: {str(e)})"
+        # Nếu LLM client yêu cầu duy nhất 1 chuỗi prompt văn bản
+        try:
+            prompt_str = f"System: {SYSTEM_PROMPT}\nUser: {text}"
+            if hasattr(llm, "chat"):
+                ai_text = llm.chat(prompt_str)
+            else:
+                ai_text = f"[AI Tutor] Hướng đi của bạn rất đúng!"
+        except Exception as inner_e:
+            ai_text = f"[AI Tutor] Lỗi tạo phản hồi từ AI: {str(inner_e)}"
 
     # 4. Lưu tin nhắn AI (là con của user_msg)
     ai_msg = ChatMessage.objects.create(
