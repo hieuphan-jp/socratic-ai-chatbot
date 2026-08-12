@@ -6,7 +6,7 @@
  * VI: Component hiển thị nội dung đã học dạng cây, lọc theo từ khóa tìm kiếm (mock).
  *     Chỉ giữ lại node khớp tìm kiếm và tổ tiên của nó để hiển thị.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { ErrorText, Input, Notice } from '@/shared/ui'
 import type { TreeNode } from '@/shared/types'
@@ -31,6 +31,9 @@ function filterTree(nodes: TreeNode[], keyword: string): TreeNode[] {
 
 function TreeNodeItem({ node, defaultOpen }: { node: TreeNode; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => {
+    setOpen(defaultOpen)
+  }, [defaultOpen])
   const hasChildren = !!node.children && node.children.length > 0
 
   return (
