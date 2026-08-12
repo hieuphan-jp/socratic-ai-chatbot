@@ -1,40 +1,44 @@
-/**
- * features/chat/api/useChat.ts
- *
- * JA: チャット機能のカスタムフック（TanStack Query による状態管理）。
- * VI: Custom hooks cho tính năng Chat (quản lý state qua TanStack Query).
- */
-
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '@/shared/api/queryKeys'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from './chatApi'
+import { queryKeys } from '@/shared/api/queryKeys'
+import type { SendMessagePayload } from '@/shared/types'
 
-// JA: メッセージ一覧取得フック / VI: Hook lấy danh sách tin nhắn
-export const useChatMessages = () => {
+// Hook lấy danh sách phiên chat
+export const useChatSessions = () => {
   return useQuery({
-    queryKey: queryKeys.chat.messages('session-1'),
-    queryFn: () => chatApi.getMessages(),
+    queryKey: queryKeys.chat.all,
+    queryFn: chatApi.getSessions,
   })
 }
 
-// JA: 思考ツリー取得フック / VI: Hook lấy dữ liệu cây tư duy
-export const useChatTree = () => {
-  return useQuery({
-    queryKey: queryKeys.chat.tree('session-1'),
-    queryFn: () => chatApi.getTree(),
+// Hook tạo phiên chat mới
+export const useCreateChatSession = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (title?: string) => chatApi.createSession(title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chat.all })
+    },
   })
 }
 
-// JA: メッセージ送信フック / VI: Hook gửi tin nhắn
+// Hook gửi tin nhắn (Truyền sessionId vào biến mutate)
 export const useSendMessage = () => {
   const queryClient = useQueryClient()
-
   return useMutation({
-    mutationFn: (text: string) => chatApi.sendMessage(text),
-    onSuccess: () => {
-      // JA: キャッシュを無効化して最新状態にする / VI: Invalidate cache để cập nhật dữ liệu mới nhất
-      queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages('session-1') })
-      queryClient.invalidateQueries({ queryKey: queryKeys.chat.tree('session-1') })
+    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: SendMessagePayload }) =>
+      chatApi.sendMessage(sessionId, payload),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chat.tree(variables.sessionId) })
     },
+  })
+}
+
+// Hook lấy dữ liệu Cây Tư Duy (React Flow Graph)
+export const useChatGraph = (sessionId: string) => {
+  return useQuery({
+    queryKey: queryKeys.chat.tree(sessionId),
+    queryFn: () => chatApi.getGraph(sessionId),
+    enabled: !!sessionId,
   })
 }

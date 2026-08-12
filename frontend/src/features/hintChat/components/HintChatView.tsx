@@ -1,232 +1,391 @@
 /**
  * features/hintChat/components/HintChatView.tsx
  *
- * JA: ヒントを対話形式で受け取るチャット画面部品（モック）。送信するとユーザー発言を追加し、
- *     少し遅れてモックのヒント応答を追加する。実API化までの見た目確認用。
- * VI: Component chat nhận hint theo dạng hội thoại (mock). Gửi thì thêm lời của user, sau đó
- *     thêm phản hồi hint giả với độ trễ nhỏ. Dùng để xem giao diện trước khi có API thật.
+ * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント。
+ * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy.
  */
-//import { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  Node,
+  Edge,
+  BackgroundVariant,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 
-//import { Button, Input, Notice } from '@/shared/ui'
+import { chatApi } from '../api/chatApi';
+import type { ChatMessage } from '@/shared/types';
 
-//import { fetchMockHintReply, type ChatMessage } from '../api/mockData'
-
-//let nextId = 0
-//function newId() {
-//  nextId += 1
-//  return `msg-${nextId}`
-//}
-
-//export function HintChatView() {
-//  const [messages, setMessages] = useState<ChatMessage[]>([])
-//  const [draft, setDraft] = useState('')
-//  const [waiting, setWaiting] = useState(false)
-
-//  function handleSend() {
-//    const text = draft.trim()
-//    if (!text || waiting) return
-
-//    const userMessage: ChatMessage = { id: newId(), role: 'user', text }
-//    setMessages((prev) => [...prev, userMessage])
-//    setDraft('')
-//    setWaiting(true)
-
-//    // JA: モックなので setTimeout で「考え中」を演出するだけ。
-//    // VI: Vì là mock nên chỉ dùng setTimeout để giả lập trạng thái "đang suy nghĩ".
-//    setTimeout(() => {
-//      const hint: ChatMessage = { id: newId(), role: 'hint', text: fetchMockHintReply(text) }
-//      setMessages((prev) => [...prev, hint])
-//      setWaiting(false)
-//    }, 500)
-//  }
-
-//  return (
-//    <div style={{ display: 'grid', gap: 12 }}>
-//      <div
-//        style={{
-//          minHeight: 240,
-//          border: '1px solid #ddd',
-//          borderRadius: 8,
-//          padding: 12,
-//          display: 'grid',
-//          gap: 8,
-//          alignContent: 'start',
-//        }}
-//      >
-//        {messages.length === 0 && <Notice>質問を送るとヒントが返ってきます / Gửi câu hỏi để nhận gợi ý</Notice>}
-//        {messages.map((m) => (
-//          <div
-//            key={m.id}
-//            style={{
-//              justifySelf: m.role === 'user' ? 'end' : 'start',
-//              background: m.role === 'user' ? '#dbeafe' : '#f1f5f9',
-//              borderRadius: 8,
-//              padding: '8px 12px',
-//              maxWidth: '80%',
-//              fontSize: 14,
-//            }}
-//          >
-//            {m.text}
-//          </div>
-//        ))}
-//        {waiting && <Notice>ヒントを考え中… / Đang nghĩ gợi ý…</Notice>}
-//      </div>
-//      <div style={{ display: 'flex', gap: 8 }}>
-//        <Input
-//          placeholder="質問を入力 / Nhập câu hỏi"
-//          value={draft}
-//          onChange={(e) => setDraft(e.target.value)}
-//          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-//          style={{ flex: 1 }}
-//        />
-//        <Button onClick={handleSend} disabled={waiting || !draft.trim()}>
-//          送信 / Gửi
-//        </Button>
-//      </div>
-//    </div>
-//  )
-//}
-
-/**
- * features/hintChat/components/HintChatView.tsx
- *
- * JA: ヒントチャット画面部品（思考ツリー表示機能付き）。
- * VI: Component chat nhận hint theo dạng hội thoại (kèm tính năng xem sơ đồ cây tư duy).
- */
-import { useState } from 'react'
-
-import type { StepNode } from '@/shared/types'
-import { Button, Input, Notice } from '@/shared/ui'
-
-import { fetchMockHintReply, initialMockTree, type ChatMessage } from '../api/mockData'
-import { TreeOverview } from './TreeOverview'
-
-let nextId = 0
-function newId() {
-  nextId += 1
-  return `msg-${nextId}`
+interface HintChatViewProps {
+  activeSessionId?: string;
+  onSessionCreated?: (newSessionId: string) => void;
 }
 
-export function HintChatView() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [draft, setDraft] = useState('')
-  const [waiting, setWaiting] = useState(false)
+export const HintChatView: React.FC<HintChatViewProps> = ({
+  activeSessionId: propSessionId,
+  onSessionCreated,
+}) => {
+  const queryClient = useQueryClient();
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(propSessionId);
+  const [inputText, setInputText] = useState('');
+  const [showTree, setShowTree] = useState(true);
 
-  // JA: 思考ツリーの状態管理と表示フラグ / VI: Quản lý state cây tư duy và flag ẩn/hiện
-  const [treeNodes, setTreeNodes] = useState<StepNode[]>(initialMockTree)
-  const [showTree, setShowTree] = useState(false)
+  // JA: 親コンポーネントからのアクティブセッションID変更を監視 / VI: Đồng bộ session ID khi props thay đổi
+  useEffect(() => {
+    if (propSessionId) {
+      setCurrentSessionId(propSessionId);
+    }
+  }, [propSessionId]);
 
-  function handleSend() {
-    const text = draft.trim()
-    if (!text || waiting) return
+  // JA: 新しいチャットセッションを作成するミューテーション / VI: Mutation tạo phiên chat mới
+  const createSessionMutation = useMutation({
+    mutationFn: (title?: string) => chatApi.createSession(title || 'Hint Chat Session'),
+    onSuccess: (newSession: any) => {
+      const newId = newSession.id;
+      setCurrentSessionId(newId);
+      if (onSessionCreated) {
+        onSessionCreated(newId);
+      }
+      queryClient.invalidateQueries({ queryKey: ['chatSessions'] });
+    },
+  });
 
-    const userMessage: ChatMessage = { id: newId(), role: 'user', text }
-    setMessages((prev) => [...prev, userMessage])
-    setDraft('')
-    setWaiting(true)
+  // JA: 1. 現在のセッションのメッセージ一覧を取得 / VI: 1. Fetch danh sách tin nhắn của session hiện tại
+  const { data: messages = [], isLoading: isLoadingMessages } = useQuery<ChatMessage[]>({
+    queryKey: ['chatMessages', currentSessionId],
+    queryFn: async () => {
+      if (!currentSessionId) return [];
+      const res = await chatApi.getMessages(currentSessionId);
+      return Array.isArray(res) ? res : (res as any).results || [];
+    },
+    enabled: !!currentSessionId,
+  });
 
-    // JA: モックなので setTimeout で「考え中」を演出する。
-    // VI: Vì là mock nên chỉ dùng setTimeout để giả lập trạng thái "đang suy nghĩ".
-    setTimeout(() => {
-      const hintText = fetchMockHintReply(text)
-      const hint: ChatMessage = { id: newId(), role: 'hint', text: hintText }
-      setMessages((prev) => [...prev, hint])
+  // JA: 2. React Flow用のノードとエッジを生成（思考ツリー） / VI: 2. Tạo Node & Edge cho Sơ đồ tư duy (React Flow)
+  const { nodes, edges } = useMemo(() => {
+    const generatedNodes: Node[] = [];
+    const generatedEdges: Edge[] = [];
 
-      // JA: メッセージ送信時、思考ツリーに新しいステップを追加する（デモ用）
-      // VI: Mỗi lần gửi câu hỏi/trả lời, tự động thêm 1 bước mới vào sơ đồ cây (dùng cho demo)
-      setTreeNodes((prev) => [
-        ...prev,
+    // JA: ユーザーの質問のみを抽出してステップ化 / VI: Lọc tin nhắn USER làm các bước suy luận
+    const userMsgs = messages.filter((msg: any) => {
+      const sender = (msg.sender || msg.node_type || msg.sender_type || '').toUpperCase();
+      return sender === 'USER' || sender === 'HUMAN';
+    });
+
+    if (userMsgs.length === 0) {
+      // JA: 初期状態のデモ用ノード / VI: Node demo khi chưa có tin nhắn
+      generatedNodes.push(
         {
-          id: `step-${prev.length + 1}`,
-          step_number: prev.length + 1,
-          label: text,
+          id: 'step-1',
+          data: { label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán' },
+          position: { x: 10, y: 30 },
+          style: {
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            padding: '8px',
+            fontSize: '11px',
+            textAlign: 'center',
+            background: '#ffffff',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+            width: 160,
+          },
         },
-      ])
+        {
+          id: 'step-2',
+          data: { label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp giải' },
+          position: { x: 130, y: 130 },
+          style: {
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            padding: '8px',
+            fontSize: '11px',
+            textAlign: 'center',
+            background: '#ffffff',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+            width: 160,
+          },
+        }
+      );
 
-      setWaiting(false)
-    }, 500)
-  }
+      generatedEdges.push({
+        id: 'e1-2',
+        source: 'step-1',
+        target: 'step-2',
+        animated: true,
+        style: { stroke: '#3b82f6', strokeDasharray: '4', strokeWidth: 1.5 },
+      });
+    } else {
+      userMsgs.forEach((msg: any, idx: number) => {
+        const text = msg.message_text || msg.content || '';
+        const stepNum = idx + 1;
+        const nodeId = msg.id || `node-${stepNum}`;
+
+        generatedNodes.push({
+          id: nodeId,
+          data: {
+            label: `ステップ${stepNum}: ${text.length > 20 ? text.substring(0, 20) + '...' : text} / Bước ${stepNum}`,
+          },
+          position: { x: 10 + (idx % 2) * 100, y: 30 + idx * 90 },
+          style: {
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            padding: '8px',
+            fontSize: '11px',
+            textAlign: 'center',
+            background: '#ffffff',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+            width: 160,
+          },
+        });
+
+        if (idx > 0) {
+          const prevNodeId = userMsgs[idx - 1].id || `node-${idx}`;
+          generatedEdges.push({
+            id: `edge-${idx}`,
+            source: prevNodeId,
+            target: nodeId,
+            animated: true,
+            style: { stroke: '#3b82f6', strokeDasharray: '4', strokeWidth: 1.5 },
+          });
+        }
+      });
+    }
+
+    return { nodes: generatedNodes, edges: generatedEdges };
+  }, [messages]);
+
+  // JA: メッセージ送信ミューテーション / VI: Mutation gửi tin nhắn
+  const sendMessageMutation = useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: { message_text: string; action_type: 'ANSWER' | 'CHANGE_METHOD' };
+    }) => chatApi.sendMessage(sessionId, payload),
+    onSuccess: (data: any) => {
+      // JA: キャッシュを直接更新して即座に画面へ反映 / VI: Cập nhật trực tiếp cache để UI phản hồi tức thì
+      queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
+        const newData = oldData ? [...oldData] : [];
+        if (data.user_message) newData.push(data.user_message);
+        if (data.ai_message) newData.push(data.ai_message);
+        return newData;
+      });
+      queryClient.invalidateQueries({ queryKey: ['chatMessages', currentSessionId] });
+    },
+  });
+
+  // JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
+
+    let targetSessionId = currentSessionId;
+
+    // JA: セッションが存在しない場合、自動的に新規作成 / VI: Tự động khởi tạo session nếu chưa có
+    if (!targetSessionId) {
+      try {
+        const newSession: any = await createSessionMutation.mutateAsync('Hint Chat Session');
+        targetSessionId = newSession.id;
+        setCurrentSessionId(targetSessionId);
+        if (onSessionCreated && targetSessionId) {
+          onSessionCreated(targetSessionId);
+        }
+      } catch (err) {
+        return;
+      }
+    }
+
+    if (targetSessionId) {
+      sendMessageMutation.mutate({
+        sessionId: targetSessionId,
+        payload: {
+          message_text: text,
+          action_type: 'ANSWER',
+        },
+      });
+    }
+
+    setInputText('');
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleSendMessage(inputText);
+  };
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      {/* JA: ヘッダー・ツリー切り替えボタン / VI: Thanh công cụ bật/tắt Cây tư duy */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 14, fontStyle: 'italic', color: '#666' }}>
+    <div style={{ width: '100%', fontFamily: 'sans-serif', color: '#333', boxSizing: 'border-box' }}>
+      
+      {/* JA: 思考ツリー表示切り替えボタン / VI: Nút Toggle Ẩn/Hiện Sơ đồ tư duy */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
           Hint Chat Session / Phiên gợi ý
-        </span>
-        <Button onClick={() => setShowTree((prev) => !prev)}>
-          {showTree ? '🌿 思考ツリーを隠す / Ẩn cây tư duy' : '🌿 思考ツリーを表示 / Xem cây tư duy'}
-        </Button>
-      </div>
-
-      {/* JA: チャットと思考ツリーのレイアウト / VI: Bố cục chính chứa Khung Chat & Cây tư duy */}
-      <div style={{ display: 'grid', gridTemplateColumns: showTree ? '1fr 280px' : '1fr', gap: 12 }}>
-        {/* Khung Chat chính */}
-        <div
+        </div>
+        <button
+          onClick={() => setShowTree(!showTree)}
           style={{
-            minHeight: 320,
-            border: '1px solid #ddd',
-            borderRadius: 8,
-            padding: 12,
-            display: 'grid',
-            gap: 8,
-            alignContent: 'start',
-            maxHeight: 480,
-            overflowY: 'auto',
+            padding: '6px 12px',
+            fontSize: '12px',
+            backgroundColor: '#f3f4f6',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            cursor: 'pointer',
           }}
         >
-          {messages.length === 0 && (
-            <Notice>質問を送るとヒントが返ってきます / Gửi câu hỏi để nhận gợi ý</Notice>
-          )}
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                justifySelf: m.role === 'user' ? 'end' : 'start',
-                background: m.role === 'user' ? '#dbeafe' : '#f1f5f9',
-                borderRadius: 8,
-                padding: '8px 12px',
-                maxWidth: '80%',
-                fontSize: 14,
-              }}
-            >
-              {m.text}
+          🌿 思考ツリーを隠す / {showTree ? 'Ẩn cây tư duy' : 'Hiện cây tư duy'}
+        </button>
+      </div>
+
+      {/* JA: チャット領域と思考ツリー領域のコンテナ / VI: Container chứa Cột Chat & Cột Sơ đồ tư duy */}
+      <div style={{ display: 'flex', gap: '16px', width: '100%', marginBottom: '16px' }}>
+        
+        {/* JA: 左カラム：チャット表示エリア / VI: CỘT TRÁI: Khung hiển thị chat */}
+        <div
+          style={{
+            flex: 1.2,
+            height: '460px',
+            border: '1px solid #e5e7eb',
+            borderRadius: '8px',
+            backgroundColor: '#ffffff',
+            padding: '16px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            boxSizing: 'border-box',
+          }}
+        >
+          {isLoadingMessages && <p style={{ fontSize: '12px', color: '#9ca3af' }}>Đang tải...</p>}
+
+          {!isLoadingMessages && messages.length === 0 && (
+            <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>
+              質問を送るとヒントが返ってきます /<br />
+              Gửi câu hỏi để nhận gợi ý
             </div>
-          ))}
-          {waiting && <Notice>ヒントを考え中… / Đang nghĩ gợi ý…</Notice>}
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {messages.map((msg, index) => {
+              const senderRole = (msg as any).sender || (msg as any).node_type || (msg as any).sender_type;
+              const isUser = (senderRole || '').toUpperCase() === 'USER';
+              const textContent = msg.message_text || (msg as any).content || '';
+
+              return (
+                <div
+                  key={msg.id || index}
+                  style={{
+                    display: 'flex',
+                    justifyContent: isUser ? 'flex-end' : 'flex-start',
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: '85%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      lineHeight: '1.5',
+                      backgroundColor: isUser ? '#2563eb' : '#f3f4f6',
+                      color: isUser ? '#ffffff' : '#1f2937',
+                      border: isUser ? 'none' : '1px solid #e5e7eb',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {textContent}
+                  </div>
+                </div>
+              );
+            })}
+
+            {sendMessageMutation.isPending && (
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    backgroundColor: '#f3f4f6',
+                    color: '#9ca3af',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  Thinking...
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Overview Cây tư duy (Hiển thị khi click nút Toggle) */}
+        {/* JA: 右カラム：思考プロセスツリー（React Flow） / VI: CỘT PHẢI: Sơ đồ tư duy (React Flow) */}
         {showTree && (
           <div
             style={{
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              padding: 12,
-              background: '#fafafa',
-              maxHeight: 480,
-              overflowY: 'auto',
+              flex: 1,
+              height: '460px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              backgroundColor: '#ffffff',
+              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxSizing: 'border-box',
             }}
           >
-            <TreeOverview treeNodes={treeNodes} />
+            <h3 style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 12px 0', color: '#111827' }}>
+              🌿 思考プロセス / Tiến trình tư duy
+            </h3>
+
+            <div style={{ flex: 1, width: '100%', border: '1px solid #f3f4f6', borderRadius: '6px' }}>
+              <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
+                <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#d1d5db" />
+                <Controls position="bottom-left" showInteractive={false} />
+              </ReactFlow>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Khung nhập tin nhắn */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Input
+      {/* JA: メッセージ入力フォーム / VI: Form nhập liệu tin nhắn */}
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
           placeholder="質問を入力 / Nhập câu hỏi"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          style={{ flex: 1 }}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            fontSize: '13px',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            outline: 'none',
+          }}
+          disabled={sendMessageMutation.isPending || createSessionMutation.isPending}
         />
-        <Button onClick={handleSend} disabled={waiting || !draft.trim()}>
-          送信 / Gửi
-        </Button>
-      </div>
+        <button
+          type="submit"
+          disabled={
+            sendMessageMutation.isPending ||
+            createSessionMutation.isPending ||
+            !inputText.trim()
+          }
+          style={{
+            padding: '10px 24px',
+            fontSize: '13px',
+            backgroundColor: '#f3f4f6',
+            color: '#4b5563',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: '500',
+          }}
+        >
+          {sendMessageMutation.isPending ? '送信中...' : '送信 / Gửi'}
+        </button>
+      </form>
+
     </div>
-  )
-}
+  );
+};
