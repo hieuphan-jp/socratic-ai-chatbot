@@ -2,20 +2,14 @@
  * features/learningTree/api/mockData.ts
  *
  * JA: 学習内容ツリーのモックデータ。バックエンドAPIが未実装のため、ここでは
- *     ダミーの木構造を返すだけ。将来 `services.py` 側が用意でき次第、この関数を
- *     `useQuery({ queryFn: () => api.get<TreeNode[]>('/learning-tree/') })` に置き換える。
- *     型 `TreeNode` は将来のシリアライザ出力に合わせて更新すること。
+ *     ダミーの木構造を返すだけ。呼び出し元は `api/hooks.ts` の `useLearningTree()`。
+ *     `services.py` が用意でき次第 hooks.ts 側の queryFn を差し替え、本ファイルは削除する。
  * VI: Dữ liệu giả cho cây nội dung đã học. Do backend API chưa có, ở đây chỉ trả về
- *     cây dữ liệu giả. Khi `services.py` sẵn sàng, thay hàm này bằng
- *     `useQuery({ queryFn: () => api.get<TreeNode[]>('/learning-tree/') })`.
- *     Kiểu `TreeNode` cần cập nhật khớp với output serializer sau này.
+ *     cây dữ liệu giả. Nơi gọi là `useLearningTree()` trong `api/hooks.ts`.
+ *     Khi `services.py` sẵn sàng, thay queryFn ở hooks.ts và xóa file này.
  */
 
-export type TreeNode = {
-  id: string
-  label: string
-  children?: TreeNode[]
-}
+import type { TreeNode } from '@/shared/types'
 
 const MOCK_TREE: TreeNode[] = [
   {

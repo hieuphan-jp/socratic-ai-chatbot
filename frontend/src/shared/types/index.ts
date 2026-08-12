@@ -49,3 +49,11 @@ export type StepNode = {
   parentId?: string        // JA: 親ステップID / VI: ID bước trước đó
   childrenIds?: string[]   // JA: 子ステップID群 / VI: Danh sách ID bước con (nếu có chia nhánh)
 }
+
+// JA: 学習内容ツリーのノード（バックエンドのシリアライザ出力に合わせて更新すること）。
+// VI: Node cây nội dung đã học (cần cập nhật khớp output serializer backend sau này).
+export type TreeNode = {
+  id: string
+  label: string
+  children?: TreeNode[]
+}
