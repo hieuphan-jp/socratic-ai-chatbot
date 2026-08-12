@@ -23,4 +23,9 @@ export const queryKeys = {
     messages: (sessionId: string) => [...queryKeys.chat.all, 'messages', sessionId] as const,
     tree: (sessionId: string) => [...queryKeys.chat.all, 'tree', sessionId] as const,
   },
+  // JA: 学習内容ツリーのクエリキー。 VI: Key cho tính năng Cây nội dung đã học.
+  learningTree: {
+    all: ['learningTree'] as const,
+    list: () => [...queryKeys.learningTree.all, 'list'] as const,
+  },
 }

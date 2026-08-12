@@ -70,4 +70,16 @@ export type FlowEdge = {
 export type GraphData = {
   nodes: FlowNode[]
   edges: FlowEdge[]
+  step_number: number      // JA: ステップ番号 / VI: Thứ tự bước (1, 2, 3...)
+  label: string            // JA: ステップの簡潔な概要 / VI: Tóm tắt ngắn gọn của bước
+  parentId?: string        // JA: 親ステップID / VI: ID bước trước đó
+  childrenIds?: string[]   // JA: 子ステップID群 / VI: Danh sách ID bước con (nếu có chia nhánh)
+}
+
+// JA: 学習内容ツリーのノード（バックエンドのシリアライザ出力に合わせて更新すること）。
+// VI: Node cây nội dung đã học (cần cập nhật khớp output serializer backend sau này).
+export type TreeNode = {
+  id: string
+  label: string
+  children?: TreeNode[]
 }

@@ -6,11 +6,12 @@
  * VI: Component hiển thị nội dung đã học dạng cây, lọc theo từ khóa tìm kiếm (mock).
  *     Chỉ giữ lại node khớp tìm kiếm và tổ tiên của nó để hiển thị.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { Input, Notice } from '@/shared/ui'
+import { ErrorText, Input, Notice } from '@/shared/ui'
+import type { TreeNode } from '@/shared/types'
 
-import { fetchMockLearningTree, type TreeNode } from '../api/mockData'
+import { useLearningTree } from '../api/hooks'
 
 // JA: keyword を含むノードだけ残した木を作る（親は子が残る限り残す）。
 // VI: Tạo lại cây chỉ giữ node chứa keyword (node cha giữ lại nếu còn con).
@@ -30,6 +31,9 @@ function filterTree(nodes: TreeNode[], keyword: string): TreeNode[] {
 
 function TreeNodeItem({ node, defaultOpen }: { node: TreeNode; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => {
+    setOpen(defaultOpen)
+  }, [defaultOpen])
   const hasChildren = !!node.children && node.children.length > 0
 
   return (
@@ -61,10 +65,11 @@ function TreeNodeItem({ node, defaultOpen }: { node: TreeNode; defaultOpen: bool
 
 export function LearningTreeView() {
   const [keyword, setKeyword] = useState('')
-  // JA: モックなので同期関数から直接取得。実API化時は useQuery に置き換える。
-  // VI: Vì là mock nên lấy trực tiếp từ hàm đồng bộ. Khi có API thật, thay bằng useQuery.
-  const tree = useMemo(() => fetchMockLearningTree(), [])
-  const filtered = useMemo(() => filterTree(tree, keyword), [tree, keyword])
+  const { data, isPending, isError, error } = useLearningTree()
+  const filtered = useMemo(() => (data ? filterTree(data, keyword) : []), [data, keyword])
+
+  if (isPending) return <Notice>読み込み中… / Đang tải…</Notice>
+  if (isError) return <ErrorText>{(error as Error).message}</ErrorText>
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
