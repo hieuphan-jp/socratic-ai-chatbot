@@ -10,10 +10,10 @@ import { HintChatView } from '@/features/hintChat/components/HintChatView'
 
 export function HintChatPage() {
   return (
-    <main style={{ maxWidth: 560, margin: '40px auto', display: 'grid', gap: 20 }}>
+    <main style={{ maxWidth: '1200px', width: '100%', margin: '20px auto', padding: '0 20px', display: 'grid', gap: 20, boxSizing: 'border-box' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 20 }}>ヒントチャット / Chat gợi ý</h1>
-        <Link to="/">戻る / Quay lại</Link>
+        <h1 style={{ fontSize: 20, fontWeight: 'bold' }}>ヒントチャット / Chat gợi ý</h1>
+        <Link to="/" style={{ color: '#4f46e5', textDecoration: 'underline' }}>戻る / Quay lại</Link>
       </header>
       <HintChatView />
     </main>

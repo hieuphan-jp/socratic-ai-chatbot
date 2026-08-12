@@ -28,4 +28,10 @@ export const chatApi = {
     const res = await client.get<GraphData>(`/chat-sessions/${sessionId}/graph/`)
     return res
   },
+
+  // 5. Lấy danh sách tin nhắn của một phiên chat (Mới thêm)
+  getMessages: async (sessionId: string) => {
+    const res = await client.get<ChatMessage[]>(`/chat-sessions/${sessionId}/messages/`)
+    return res
+  },
 }
