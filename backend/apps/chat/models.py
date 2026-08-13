@@ -1,8 +1,29 @@
-# JA: Chat機能のモデル定義。テーブル構造のみ管理 / VI: Định nghĩa model tính năng Chat. Chỉ quản lý cấu trúc bảng
+# JA: Chat機能のモデル定義。テーブル構造のみ管理
+# VI: Định nghĩa model tính năng Chat. Chỉ quản lý cấu trúc bảng
 from django.conf import settings
 from django.db import models
 
 from apps.common.models import BaseModel  # UUID PK + timestamps
+from apps.topics.models import KnowledgeNode
+
+
+class Attempt(BaseModel):
+    # JA: KnowledgeNode 1件に対する1回の挑戦。hint_count・completed_at を
+    #     どのタイミングで更新するか(ヒント送信のたびに+1する、ユーザーが
+    #     「理解できた」と申告したときにcompleted_atをセットする、等)は
+    #     チャット機能側の実装に委ねる。ここではテーブル構造のみ定義する。
+    # VI: Một lần thử cho 1 KnowledgeNode. Việc cập nhật hint_count/
+    #     completed_at vào lúc nào (mỗi lần gửi gợi ý thì +1, khi người dùng
+    #     báo "đã hiểu" thì set completed_at, v.v.) do phía tính năng chat tự
+    #     triển khai. Ở đây chỉ định nghĩa cấu trúc bảng.
+    node = models.ForeignKey(
+        KnowledgeNode, on_delete=models.CASCADE, related_name="attempts"
+    )
+    hint_count = models.PositiveIntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self) -> str:
+        return f"Attempt({self.node_id}) hints={self.hint_count}"
 
 
 class ChatSession(BaseModel):
