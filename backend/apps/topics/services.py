@@ -13,6 +13,8 @@ VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Vi�
     (vì quyền sở hữu thuộc app này).
 """
 
+from django.db.models import Q
+
 from apps.common.exceptions import PermissionDenied, ValidationError
 
 from .models import KnowledgeNode, Topic
@@ -105,3 +107,62 @@ def build_learning_tree(*, user) -> list[dict]:
         return result
 
     return [build(t) for t in children_by_parent.get(None, [])]
+
+
+def get_topic_children(*, topic: Topic) -> tuple[list[Topic], list[KnowledgeNode]]:
+    """
+    JA: 検索セッションのドリルダウンUI用。指定Topic直下の子Topicと、直属の
+        常設KnowledgeNode(origin_nodeがNULLのもの)を返す。
+    VI: Dùng cho UI duyệt sâu dần của phiên tìm kiếm. Trả về Topic con trực tiếp
+        và KnowledgeNode cố định (origin_node là NULL) trực thuộc topic.
+    """
+    child_topics = list(Topic.objects.filter(parent=topic).order_by("position", "created_at"))
+    nodes = list(
+        KnowledgeNode.objects.filter(topic=topic, origin_node__isnull=True).order_by("created_at")
+    )
+    return child_topics, nodes
+
+
+def _descendant_topic_ids(topic: Topic) -> list:
+    """
+    JA: topic自身を含む、配下すべてのTopic idを再帰的に集める(検索範囲の特定用)。
+        同一userのTopicをまとめて1回で取得し、Python側で親子関係を辿ることで
+        深さ分だけクエリを発行するのを避ける。
+    VI: Thu thập id của chính topic và toàn bộ Topic con cháu (đệ quy), dùng để
+        xác định phạm vi tìm kiếm. Lấy一次 toàn bộ Topic của cùng user rồi duyệt
+        quan hệ cha/con ở phía Python để tránh tốn 1 query cho mỗi tầng sâu.
+    """
+    all_topics = Topic.objects.filter(user_id=topic.user_id).only("id", "parent_id")
+    children_by_parent: dict = {}
+    for t in all_topics:
+        children_by_parent.setdefault(t.parent_id, []).append(t.id)
+
+    ids = [topic.id]
+    stack = [topic.id]
+    while stack:
+        current = stack.pop()
+        for child_id in children_by_parent.get(current, []):
+            ids.append(child_id)
+            stack.append(child_id)
+    return ids
+
+
+def search_knowledge_nodes(*, topic: Topic, query: str) -> list[KnowledgeNode]:
+    """
+    JA: topic配下(自身を含む)を再帰的に検索し、title/contentにqueryを含む
+        常設KnowledgeNode(origin_nodeがNULLのもの)を返す。AI生成の使い捨て
+        類題は検索セッションには出さない。
+    VI: Tìm đệ quy trong phạm vi topic (bao gồm chính nó), trả về KnowledgeNode
+        cố định (origin_node là NULL) có title/content chứa query. Không đưa
+        node類題 dùng một lần do AI sinh vào phiên tìm kiếm.
+    """
+    query = (query or "").strip()
+    if not query:
+        raise ValidationError("q is required")
+
+    topic_ids = _descendant_topic_ids(topic)
+    return list(
+        KnowledgeNode.objects.filter(topic_id__in=topic_ids, origin_node__isnull=True)
+        .filter(Q(title__icontains=query) | Q(content__icontains=query))
+        .order_by("created_at")
+    )
