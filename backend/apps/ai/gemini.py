@@ -7,8 +7,6 @@ from .base import ChatResult, LLMProvider
 
 logger = logging.getLogger(__name__)
 
-# JA: 429 (レート制限) 時のリトライ設定。
-# VI: Cấu hình retry khi gặp lỗi 429 (rate limit).
 MAX_RETRIES = 2
 BACKOFF_SECONDS = [
     3,
@@ -32,10 +30,6 @@ class GeminiProvider(LLMProvider):
         self.model = self._get_working_model()
 
     def _get_working_model(self):
-        # JA: これはコンストラクタから1回だけ呼ばれる (get_llm() が @lru_cache で
-        #     シングルトン化されたため)。genai.list_models() はここでのみ実行される。
-        # VI: Hàm này chỉ được gọi 1 lần từ constructor (vì get_llm() đã singleton
-        #     hóa bằng @lru_cache). genai.list_models() chỉ chạy đúng ở đây, 1 lần.
         preferred_models = [
             "models/gemini-3.5-flash",
             "models/gemini-flash-latest",
@@ -62,36 +56,44 @@ class GeminiProvider(LLMProvider):
 
         return genai.GenerativeModel("models/gemini-3.5-flash")
 
-    def chat(self, messages) -> ChatResult:
-        if isinstance(messages, list) and len(messages) > 0:
-            last_msg = messages[-1]
-            if hasattr(last_msg, "content"):
-                prompt = last_msg.content
-            elif isinstance(last_msg, dict):
-                prompt = last_msg.get("content", str(last_msg))
-            else:
-                prompt = str(last_msg)
-        else:
-            prompt = str(messages)
+    def _messages_to_prompt(self, messages) -> str:
+        """
+        JA: ★重要な修正: 以前は messages[-1] (最後の1件) しか使っていなかったため、
+            system プロンプト（家庭教師としての指示）と過去の会話履歴が
+            Gemini に一切送られていなかった（＝毎回「記憶喪失」状態だった）。
+            ここでリスト全体を「ROLE: content」形式のテキストに結合し、
+            system指示・会話履歴・新しい質問がすべて Gemini に渡るようにする。
+        VI: ★Sửa lỗi quan trọng: Trước đây chỉ dùng messages[-1] (tin nhắn cuối),
+            khiến system prompt (chỉ thị đóng vai gia sư) và lịch sử hội thoại
+            KHÔNG BAO GIỜ được gửi tới Gemini (=mỗi lần hỏi Gemini đều "mất trí nhớ").
+            Ở đây ghép TOÀN BỘ danh sách thành text dạng "ROLE: nội dung",
+            để cả system, lịch sử hội thoại, và câu hỏi mới đều được gửi đủ.
+        """
+        if not isinstance(messages, list) or len(messages) == 0:
+            return str(messages)
 
+        lines = []
+        for m in messages:
+            if hasattr(m, "role") and hasattr(m, "content"):
+                role, content = m.role, m.content
+            elif isinstance(m, dict):
+                role, content = m.get("role", "user"), m.get("content", str(m))
+            else:
+                role, content = "user", str(m)
+            lines.append(f"{role.upper()}: {content}")
+
+        return "\n\n".join(lines)
+
+    def chat(self, messages) -> ChatResult:
+        prompt = self._messages_to_prompt(messages)
         last_error: Exception | None = None
 
-        # JA: 429 の場合のみ、指数バックオフしながら最大 MAX_RETRIES 回リトライする。
-        #     それ以外のエラー（不正な入力、ネットワーク断など）は即座に失敗として返す。
-        # VI: CHỈ retry khi gặp lỗi 429, đợi tăng dần (backoff) tối đa MAX_RETRIES lần.
-        #     Các lỗi khác (input sai, mất mạng, v.v.) trả lỗi ngay, không retry.
         for attempt in range(MAX_RETRIES + 1):
             try:
                 response = self.model.generate_content(prompt)
                 return ChatResult(text=response.text)
             except Exception as e:
                 last_error = e
-                # JA: ★デバッグ用: Google 側の生エラーをそのままログ出力する。
-                #     quota_metric / quota_id が含まれていれば、RPM (分単位) なのか
-                #     RPD (日単位) なのか、正確な原因が分かる。
-                # VI: ★Debug: log nguyên văn lỗi gốc từ Google. Nếu có chứa
-                #     quota_metric / quota_id thì sẽ biết chính xác là quota theo
-                #     PHÚT (RPM) hay theo NGÀY (RPD) đang bị chạm.
                 logger.error(
                     "[Gemini] Lần thử %s/%s thất bại. Loại lỗi: %s | Chi tiết: %r",
                     attempt + 1,
@@ -104,17 +106,13 @@ class GeminiProvider(LLMProvider):
                     continue
                 break
 
-        # JA: リトライしても回復しなかった場合の最終エラー処理。
-        # VI: Xử lý lỗi cuối cùng nếu retry vẫn không phục hồi được.
         error_str = str(last_error)
         if _is_rate_limit_error(last_error):
             return ChatResult(
                 text=(
                     "[AI Tutor] Hệ thống Gemini đang bị giới hạn số lượt gọi trong phút này "
                     "(429 - Too Many Requests / hết quota), đã thử lại nhưng vẫn chưa được. "
-                    "Vui lòng đợi khoảng 30-60 giây rồi thử lại. Nếu lỗi này lặp lại thường "
-                    "xuyên, cân nhắc kiểm tra hạn mức (quota) tại Google AI Studio hoặc đổi "
-                    "sang model có giới hạn request/phút cao hơn."
+                    "Vui lòng đợi khoảng 30-60 giây rồi thử lại."
                 )
             )
         return ChatResult(text=f"[AI Tutor Error] Lỗi khi gọi Gemini API: {error_str}")
