@@ -16,9 +16,7 @@ class Attempt(BaseModel):
     #     completed_at vào lúc nào (mỗi lần gửi gợi ý thì +1, khi người dùng
     #     báo "đã hiểu" thì set completed_at, v.v.) do phía tính năng chat tự
     #     triển khai. Ở đây chỉ định nghĩa cấu trúc bảng.
-    node = models.ForeignKey(
-        KnowledgeNode, on_delete=models.CASCADE, related_name="attempts"
-    )
+    node = models.ForeignKey(KnowledgeNode, on_delete=models.CASCADE, related_name="attempts")
     hint_count = models.PositiveIntegerField(default=0)
     completed_at = models.DateTimeField(null=True, blank=True)
 

@@ -1,6 +1,8 @@
 # JA: Chat機能の純粋な業務ロジック（HTTP非依存） / VI: Logic nghiệp vụ thuần túy của tính năng Chat (không phụ thuộc HTTP)
 import logging
-from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
+
+from apps.ai.base import ChatMessage as AIChatMessage
+from apps.ai.base import ChatResult
 from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
 

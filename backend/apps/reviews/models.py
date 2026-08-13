@@ -13,8 +13,8 @@ VI: Lịch ôn tập ngắt quãng (ReviewSchedule) và bản ghi mỗi lần ô
 from django.db import models
 from django.utils import timezone
 
-from apps.common.models import BaseModel
 from apps.chat.models import Attempt
+from apps.common.models import BaseModel
 from apps.topics.models import KnowledgeNode
 
 
@@ -42,10 +42,7 @@ class ReviewSchedule(BaseModel):
     )
     learned_count = models.PositiveIntegerField(
         default=0,
-        help_text=(
-            "学習した回数の累計。SM-2の repetitions と違い、"
-            "失敗しても0にリセットしない"
-        ),
+        help_text=("学習した回数の累計。SM-2の repetitions と違い、失敗しても0にリセットしない"),
     )
 
     class Meta:
