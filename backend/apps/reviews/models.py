@@ -14,7 +14,7 @@ from django.db import models
 from django.utils import timezone
 
 from apps.common.models import BaseModel
-from apps.learning.models import Attempt
+from apps.chat.models import Attempt
 from apps.topics.models import KnowledgeNode
 
 

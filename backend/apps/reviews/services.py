@@ -175,7 +175,7 @@ def start_review(user, source_node: KnowledgeNode):
     - performance_rating の計算方法
         -> record_review_result() 側の責務であり、開始時点では関係ない
     """
-    from apps.learning.services import start_attempt  # アプリ間の循環importを避けるため関数内import
+    from apps.chat.services import start_attempt  # アプリ間の循環importを避けるため関数内import
 
     generated_node = generate_similar_problem(source_node)
     return start_attempt(user=user, node_id=generated_node.id)
