@@ -1,39 +1,65 @@
-# JA: Chat機能のモデル定義。テーブル構造のみ管理 / VI: Định nghĩa model tính năng Chat. Chỉ quản lý cấu trúc bảng
-from django.conf import settings
+# JA: チャット機能と復習機能のデータモデル定義
+# VI: Định nghĩa Data Model cho tính năng Chat và Spaced Repetition (Reviews)
+
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
 
-from apps.common.models import BaseModel  # UUID PK + timestamps
 
-
-class ChatSession(BaseModel):
-    # JA: 所有者。get_queryset で必ず絞る / VI: Chủ sở hữu; luôn lọc trong get_queryset
+class ChatSession(models.Model):
+    """
+    JA: チャットセッション（ERDの ATTEMPT テーブルに相当）
+        ユーザーの学習試行データを保持し、KNOWLEDGE_NODE と紐付けられる。
+    VI: Phiên chat (Tương đương với bảng ATTEMPT trong ERD)
+        Lưu trữ dữ liệu thử sức/học tập của người dùng và liên kết với KNOWLEDGE_NODE.
+    """
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_sessions"
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE,
+        help_text="JA: ユーザーID / VI: ID người dùng"
     )
-    title = models.CharField(max_length=255, default="New Chat Session")
-
-    def __str__(self) -> str:
-        return f"{self.user.username} - {self.title}"
-
-
-class ChatMessage(BaseModel):
-    class Sender(models.TextChoices):
-        USER = "USER", "User"
-        AI = "AI", "AI"
-
-    class NodeType(models.TextChoices):
-        STEP = "STEP", "Step Node"
-        ANSWER = "ANSWER", "Answer Node"
-        CHANGE_METHOD = "CHANGE_METHOD", "Change Method Node"
-
-    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
-    parent_message = models.ForeignKey(
-        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="children"
+    title = models.CharField(
+        max_length=255, 
+        default="New Session",
+        help_text="JA: セッションタイト / VI: Tiêu đề phiên chat"
     )
-    sender = models.CharField(max_length=10, choices=Sender.choices)
-    message_text = models.TextField()
-    is_hint = models.BooleanField(default=False)
-    node_type = models.CharField(max_length=20, choices=NodeType.choices, default=NodeType.STEP)
+    
+    # JA: KNOWLEDGE_NODE への外部キー（1:N の関係）
+    # VI: Khoá ngoại nối tới KNOWLEDGE_NODE (Mối quan hệ 1:N)
+    knowledge_node = models.ForeignKey(
+        'reviews.KnowledgeNode', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='attempts',
+        help_text="JA: 関連する知識ノード / VI: Node kiến thức liên quan"
+    )
+    
+    # JA: 間隔復習 (Spaced Repetition) 用のフィールド (ATTEMPT 由来)
+    # VI: Các trường phục vụ tính năng lặp lại ngắt quãng (Bảng ATTEMPT)
+    hint_count = models.IntegerField(
+        default=0,
+        help_text="JA: ヒント要求回数 / VI: Số lần xin gợi ý"
+    )
+    completed_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="JA: 学習完了日時 / VI: Thời gian hoàn thành phiên học"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="JA: 作成日時 / VI: Thời gian tạo"
+    )
 
-    def __str__(self) -> str:
-        return f"[{self.sender}] {self.message_text[:30]}"
+    class Meta:
+        db_table = 'chat_sessions'
+        verbose_name = 'Chat Session'
+        verbose_name_plural = 'Chat Sessions'
+
+    def mark_completed(self):
+        """
+        JA: セッションを完了状態としてマークする
+        VI: Đánh dấu phiên học đã hoàn thành
+        """
+        self.completed_at = timezone.now()
+        self.save(update_fields=['completed_at'])
