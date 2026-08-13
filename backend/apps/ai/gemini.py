@@ -2,12 +2,16 @@ import logging
 import time
 
 import google.generativeai as genai
+
 from .base import ChatResult, LLMProvider
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 2
-BACKOFF_SECONDS = [3, 6]
+BACKOFF_SECONDS = [
+    3,
+    6,
+]  # JA: 1回目失敗後3秒待機、2回目失敗後6秒待機 / VI: Thất bại lần 1 đợi 3s, lần 2 đợi 6s
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
@@ -35,7 +39,8 @@ class GeminiProvider(LLMProvider):
 
         try:
             available_models = [
-                m.name for m in genai.list_models()
+                m.name
+                for m in genai.list_models()
                 if "generateContent" in m.supported_generation_methods
             ]
 
@@ -91,7 +96,10 @@ class GeminiProvider(LLMProvider):
                 last_error = e
                 logger.error(
                     "[Gemini] Lần thử %s/%s thất bại. Loại lỗi: %s | Chi tiết: %r",
-                    attempt + 1, MAX_RETRIES + 1, type(e).__name__, e,
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    type(e).__name__,
+                    e,
                 )
                 if _is_rate_limit_error(e) and attempt < MAX_RETRIES:
                     time.sleep(BACKOFF_SECONDS[attempt])

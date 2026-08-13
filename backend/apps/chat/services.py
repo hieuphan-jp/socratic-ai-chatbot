@@ -8,6 +8,9 @@ from typing import Any, Dict
 from django.utils import timezone
 
 from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
+
+from apps.ai.base import ChatMessage as AIChatMessage
+from apps.ai.base import ChatResult
 from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
 from apps.reviews.models import ReviewLog
