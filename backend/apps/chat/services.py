@@ -1,8 +1,12 @@
 # JA: Chat機能の純粋な業務ロジック（HTTP非依存） / VI: Logic nghiệp vụ thuần túy của tính năng Chat (không phụ thuộc HTTP)
+import logging
+from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
 from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
 
 from .models import ChatMessage, ChatSession
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an AI Tutor. Guide the user step by step through learning.
@@ -47,13 +51,6 @@ def get_session_graph_data(*, session: ChatSession) -> dict:
             )
 
     return {"nodes": nodes, "edges": edges}
-class MessageObject:
-    def __init__(self, role: str, content: str):
-        self.role = role
-        self.content = content
-
-    def __getitem__(self, item):
-        return getattr(self, item)
 
 
 def send_message_and_get_ai_response(
@@ -90,33 +87,28 @@ def send_message_and_get_ai_response(
     # 3. Lấy LLM provider và tạo phản hồi
     llm = get_llm()
 
-    # Tạo danh sách tin nhắn tương thích cả dạng Object (.role) lẫn Dict (['role'])
+    # JA: base.py の ChatMessage スキーマに準拠したペイロードを構築
+    # VI: Dùng đúng cấu trúc AIChatMessage chuẩn của hợp đồng base.py
     messages_payload = [
-        MessageObject("system", SYSTEM_PROMPT),
-        MessageObject("user", f"Action: {action_type}\nMessage: {text}"),
+        AIChatMessage(role="system", content=SYSTEM_PROMPT),
+        AIChatMessage(role="user", content=f"Action: {action_type}\nMessage: {text}"),
     ]
 
     try:
-        if hasattr(llm, "chat"):
-            ai_text = llm.chat(messages_payload)
-        elif hasattr(llm, "generate_text"):
-            prompt_str = f"System: {SYSTEM_PROMPT}\nUser: {text}"
-            ai_text = llm.generate_text(prompt_str)
-        elif hasattr(llm, "invoke"):
-            response = llm.invoke(messages_payload)
-            ai_text = getattr(response, "content", str(response))
+        raw_response = llm.chat(messages_payload)
+
+        # JA: ChatResult オブジェクトからテキストを抽出
+        # VI: Bóc tách lấy text thuần túy từ đối tượng ChatResult
+        if isinstance(raw_response, ChatResult):
+            ai_text = raw_response.text
+        elif hasattr(raw_response, "text"):
+            ai_text = raw_response.text
         else:
-            ai_text = f"[AI Tutor] Nhận xét câu trả lời '{text}': Hướng đi rất tốt, hãy làm tiếp bước sau!"
+            ai_text = str(raw_response)
+
     except Exception as e:
-        # Nếu LLM client yêu cầu duy nhất 1 chuỗi prompt văn bản
-        try:
-            prompt_str = f"System: {SYSTEM_PROMPT}\nUser: {text}"
-            if hasattr(llm, "chat"):
-                ai_text = llm.chat(prompt_str)
-            else:
-                ai_text = f"[AI Tutor] Hướng đi của bạn rất đúng!"
-        except Exception as inner_e:
-            ai_text = f"[AI Tutor] Lỗi tạo phản hồi từ AI: {str(inner_e)}"
+        logger.error("JA: AI応答生成エラー: %s / VI: Lỗi tạo phản hồi AI: %s", e, e)
+        ai_text = f"[AI Tutor] Lỗi tạo phản hồi từ AI: {str(e)}"
 
     # 4. Lưu tin nhắn AI (là con của user_msg)
     ai_msg = ChatMessage.objects.create(
