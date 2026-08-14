@@ -33,9 +33,9 @@ class ReviewScheduleViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def get_queryset(self):
         # JA: ★所有者絞り込み(必須)。ノードの所属Topic経由でuserを辿る
         # VI: ★Lọc theo chủ sở hữu (bắt buộc). Đi qua Topic của node để lấy user
-        return ReviewSchedule.objects.filter(
-            node__topic__user=self.request.user
-        ).select_related("node", "node__topic")
+        return ReviewSchedule.objects.filter(node__topic__user=self.request.user).select_related(
+            "node", "node__topic"
+        )
 
     @action(detail=False, methods=["get"])
     def due(self, request):

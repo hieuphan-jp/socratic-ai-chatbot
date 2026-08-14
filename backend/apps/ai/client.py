@@ -1,11 +1,13 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+
 from django.conf import settings
 from dotenv import load_dotenv
 
 from .base import LLMProvider
 from .fake import FakeProvider
+
 # JA: GeminiProvider は google-generativeai パッケージに依存するため、
 #     ここでは import しない。トップレベルで import すると、パッケージが
 #     インストールされていない環境では client.py を import した時点で
@@ -54,11 +56,15 @@ def get_llm() -> LLMProvider:
         except (ImportError, ModuleNotFoundError) as e:
             # JA: パッケージが未インストールの環境 → fake にフォールバック
             # VI: Máy chưa cài package google-generativeai → rơi về fake
-            print(f"[AI Provider] Thiếu package 'google-generativeai', dùng FakeProvider thay thế. Chi tiết: {e}")
+            print(
+                f"[AI Provider] Thiếu package 'google-generativeai', dùng FakeProvider thay thế. Chi tiết: {e}"
+            )
         except Exception as e:
             # JA: API キー不正・ネットワークエラーなど、その他の初期化失敗 → fake にフォールバック
             # VI: Lỗi khác khi khởi tạo Gemini (API key sai, lỗi mạng, model không khả dụng, v.v.)
             #     → rơi về fake
-            print(f"[AI Provider] Không thể khởi tạo GeminiProvider, dùng FakeProvider thay thế. Chi tiết: {e}")
+            print(
+                f"[AI Provider] Không thể khởi tạo GeminiProvider, dùng FakeProvider thay thế. Chi tiết: {e}"
+            )
 
     return FakeProvider()

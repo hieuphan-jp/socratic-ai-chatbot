@@ -20,4 +20,5 @@ urlpatterns = [
     # VI: urls của từng app tính năng include tại đây, mỗi app 1 dòng (xem CONVENTIONS.md §4).
     path("api/", include("apps.chat.urls")),
     path("api/", include("apps.topics.urls")),
+    path("api/", include("apps.reviews.urls")),
 ]
