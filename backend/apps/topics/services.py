@@ -22,7 +22,7 @@ from django.db.models import Q
 
 from apps.ai.base import ChatMessage
 from apps.ai.client import get_llm
-from apps.common.exceptions import PermissionDenied, ValidationError
+from apps.common.exceptions import NotFound, PermissionDenied, ValidationError
 
 from .models import KnowledgeNode, SearchHistory, Topic
 
@@ -58,6 +58,19 @@ def create_topic(*, user, name: str, description: str = "", parent: Topic | None
         description=(description or "").strip(),
         position=_next_position(user=user, parent=parent),
     )
+
+
+def get_owned_topic(*, user, topic_id) -> Topic:
+    """
+    JA: 他アプリ(例: apps/chat)がTopicを所有権チェック込みで取得するための窓口。
+        Topicモデルへの直接クエリは他アプリにさせず、この関数経由に一本化する。
+    VI: Cửa ngõ để app khác (vd: apps/chat) lấy Topic kèm kiểm tra chủ sở hữu.
+        Không cho app khác query trực tiếp model Topic; phải qua hàm này.
+    """
+    topic = Topic.objects.filter(id=topic_id, user=user).first()
+    if topic is None:
+        raise NotFound("Topic が見つかりません / Không tìm thấy Topic")
+    return topic
 
 
 def create_knowledge_node(*, user, topic: Topic, title: str, content: str) -> KnowledgeNode:

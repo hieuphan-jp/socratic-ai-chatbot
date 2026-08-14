@@ -44,6 +44,7 @@ class ChatSessionViewSet(
             parent_message_id=input_serializer.validated_data.get("parent_message_id"),
             action_type=input_serializer.validated_data["action_type"],
             understood=input_serializer.validated_data.get("understood", False),
+            topic_id=input_serializer.validated_data.get("topic_id"),
         )
 
         return Response(
@@ -54,6 +55,12 @@ class ChatSessionViewSet(
                 "ai_message": ChatMessageSerializer(result["ai_message"]).data
                 if result.get("ai_message")
                 else None,
+                # JA: ★このリクエストで知識ノードが新規作成された場合、フロントが
+                #     「知識ノードとして保存しました」と表示するために返す。
+                # VI: ★Trả về để frontend hiển thị "đã lưu thành knowledge node"
+                #     khi node vừa được tạo mới trong request này.
+                "knowledge_node": str(session.knowledge_node_id) if session.knowledge_node_id else None,
+                "knowledge_node_title": session.knowledge_node.title if session.knowledge_node_id else None,
             },
             status=status.HTTP_200_OK,
         )
