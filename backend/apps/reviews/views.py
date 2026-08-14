@@ -43,9 +43,9 @@ class ReviewScheduleViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         # VI: ★Lọc theo chủ sở hữu (bắt buộc). Đi qua Topic của node để lấy
         #     user. Danh sách không lọc gì (list) dự kiến dùng cho ④ (tô màu
         #     toàn bộ cây).
-        return ReviewSchedule.objects.filter(
-            node__topic__user=self.request.user
-        ).select_related("node", "node__topic")
+        return ReviewSchedule.objects.filter(node__topic__user=self.request.user).select_related(
+            "node", "node__topic"
+        )
 
     @action(detail=False, methods=["get"])
     def due(self, request):

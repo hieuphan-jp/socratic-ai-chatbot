@@ -76,9 +76,7 @@ def get_or_create_active_attempt(*, session: ChatSession) -> Attempt:
         thì tạo mới. Nếu Attempt trước đã hoàn thành thì tạo mới cho lần
         này. Đây là ranh giới "lần ôn tập thứ mấy".
     """
-    attempt = (
-        session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
-    )
+    attempt = session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
     if attempt is None:
         attempt = Attempt.objects.create(chat_session=session)
     return attempt
@@ -170,9 +168,7 @@ def send_message_and_get_ai_response(
     #     COMPLETE sẽ liên động tới tính SM-2 ở tính năng ôn tập
     #     (apps.reviews) luôn tại đây.
     if action_type in ("HINT", "COMPLETE"):
-        record_hint_or_completion(
-            session=session, action_type=action_type, understood=understood
-        )
+        record_hint_or_completion(session=session, action_type=action_type, understood=understood)
 
     # 1. Tìm parent message nếu có
     parent_msg = None

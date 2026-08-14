@@ -52,10 +52,7 @@ class ReviewSchedule(BaseModel):
     )
     learned_count = models.PositiveIntegerField(
         default=0,
-        help_text=(
-            "学習した回数の累計。SM-2の repetitions と違い、"
-            "失敗しても0にリセットしない"
-        ),
+        help_text=("学習した回数の累計。SM-2の repetitions と違い、失敗しても0にリセットしない"),
     )
 
     class Meta:

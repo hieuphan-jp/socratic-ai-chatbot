@@ -4,14 +4,13 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('topics', '0001_initial'),
+        ("topics", "0001_initial"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='knowledgenode',
-            name='origin_node',
+            model_name="knowledgenode",
+            name="origin_node",
         ),
     ]
