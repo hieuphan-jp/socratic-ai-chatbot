@@ -8,7 +8,7 @@ VI: Chỉ định nghĩa hình dạng JSON và kiểm tra đầu vào. Lưu/phá
 
 from rest_framework import serializers
 
-from .models import KnowledgeNode, Topic
+from .models import KnowledgeNode, SearchHistory, Topic
 
 
 class TopicSerializer(serializers.ModelSerializer):
@@ -71,3 +71,20 @@ class KnowledgeNodeDetailSerializer(serializers.ModelSerializer):
         model = KnowledgeNode
         fields = ["id", "title", "content", "topic", "topic_name"]
         read_only_fields = fields
+
+
+class SearchHistorySerializer(serializers.ModelSerializer):
+    """JA: 検索履歴の表示用。VI: Dùng để hiển thị lịch sử tìm kiếm."""
+
+    topic_name = serializers.CharField(source="topic.name", read_only=True)
+
+    class Meta:
+        model = SearchHistory
+        fields = ["id", "query", "topic", "topic_name", "created_at"]
+        read_only_fields = fields
+
+
+class AISearchInputSerializer(serializers.Serializer):
+    """JA: AI検索の入力検証のみ。VI: Chỉ kiểm tra đầu vào của AI search."""
+
+    description = serializers.CharField()

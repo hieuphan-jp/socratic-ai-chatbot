@@ -53,3 +53,24 @@ class KnowledgeNode(BaseModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+class SearchHistory(BaseModel):
+    # JA: 検索セッション(Topic.search)が呼ばれるたびに1件記録する検索履歴。
+    #     BaseModelの既定順序(-created_at)がそのまま「新しい順のスタック」になる。
+    #     user は topic.user と常に一致する(所有権チェックはsearch_knowledge_nodes側で
+    #     既に済んでいる前提のため、ここでは重複して持たせるだけ)。
+    # VI: Lịch sử tìm kiếm, ghi 1 dòng mỗi lần phiên tìm kiếm (Topic.search) được gọi.
+    #     Thứ tự mặc định của BaseModel (-created_at) chính là "ngăn xếp mới nhất trước".
+    #     user luôn khớp với topic.user (việc kiểm tra quyền sở hữu đã xong ở
+    #     search_knowledge_nodes, ở đây chỉ lưu lại để truy vấn theo user cho tiện).
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="search_history"
+    )
+    topic = models.ForeignKey(
+        Topic, on_delete=models.CASCADE, related_name="search_history_entries"
+    )
+    query = models.CharField(max_length=255)
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.query}"

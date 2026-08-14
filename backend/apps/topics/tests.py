@@ -130,3 +130,44 @@ class SearchSessionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         titles = [n["title"] for n in resp.json()]
         self.assertEqual(titles, ["一次方程式の基礎"])
+
+    def test_ai_search_returns_suggestion_list(self):
+        resp = self.client.post(
+            "/api/topics/ai-search/",
+            {"description": "三角形や角度を扱う分野"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        suggestions = resp.json()["suggestions"]
+        self.assertIsInstance(suggestions, list)
+        self.assertGreaterEqual(len(suggestions), 1)
+        self.assertLessEqual(len(suggestions), 5)
+
+    def test_ai_search_without_description_returns_400(self):
+        resp = self.client.post("/api/topics/ai-search/", {}, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_search_records_history_newest_first(self):
+        self.client.get(f"/api/topics/{self.algebra.id}/search/?q=一次")
+        self.client.get(f"/api/topics/{self.math.id}/search/?q=判別式")
+
+        resp = self.client.get("/api/search-history/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data), 2)
+        # JA: 新しい順(直近の検索が先頭)。VI: Mới nhất trước (tìm kiếm gần nhất ở đầu).
+        self.assertEqual([h["query"] for h in data], ["判別式", "一次"])
+        self.assertEqual(data[0]["topic"], str(self.math.id))
+        self.assertEqual(data[0]["topic_name"], "数学")
+
+    def test_failed_search_does_not_record_history(self):
+        self.client.get(f"/api/topics/{self.algebra.id}/search/")  # q無し→400
+        resp = self.client.get("/api/search-history/")
+        self.assertEqual(resp.json(), [])
+
+    def test_other_user_cannot_see_search_history(self):
+        self.client.get(f"/api/topics/{self.algebra.id}/search/?q=一次")
+        self.client.force_login(self.other)
+        resp = self.client.get("/api/search-history/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), [])

@@ -13,11 +13,26 @@ VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Vi�
     (vì quyền sở hữu thuộc app này).
 """
 
+import re
+
 from django.db.models import Q
 
+from apps.ai.base import ChatMessage
+from apps.ai.client import get_llm
 from apps.common.exceptions import PermissionDenied, ValidationError
 
-from .models import KnowledgeNode, Topic
+from .models import KnowledgeNode, SearchHistory, Topic
+
+# JA: AIに候補単語を出させるためのプロンプト。前置き無しでカンマ区切り1行だけを
+#     出力させることで、パース処理を単純に保つ。
+# VI: Prompt để AI đưa ra từ ứng viên. Yêu cầu chỉ xuất 1 dòng phân tách bằng dấu phẩy,
+#     không lời dẫn, để việc parse ở phía sau đơn giản.
+_AI_SEARCH_SYSTEM_PROMPT = (
+    "あなたは学習用語の名付けアシスタントです。ユーザーは調べたい分野や概念の"
+    "名前を思い出せず、曖昧な説明しかできません。説明から、学習カテゴリ名として"
+    "使われそうな短い単語(名詞)の候補を1〜5個、カンマ区切りで1行だけ出力してください。"
+    "説明や前置きは一切不要です。"
+)
 
 
 def _next_position(*, user, parent: Topic | None) -> int:
@@ -160,9 +175,53 @@ def search_knowledge_nodes(*, topic: Topic, query: str) -> list[KnowledgeNode]:
     if not query:
         raise ValidationError("q is required")
 
+    # JA: 履歴記録は検索そのものの成否に影響させない副作用として最後に行う。
+    # VI: Việc ghi lịch sử là tác dụng phụ, đặt sau cùng, không ảnh hưởng kết quả tìm kiếm.
+    SearchHistory.objects.create(user_id=topic.user_id, topic=topic, query=query)
+
     topic_ids = _descendant_topic_ids(topic)
     return list(
         KnowledgeNode.objects.filter(topic_id__in=topic_ids, origin_node__isnull=True)
         .filter(Q(title__icontains=query) | Q(content__icontains=query))
         .order_by("created_at")
     )
+
+
+# JA: 検索履歴として保持する最大件数(時系列スタック表示用)。SearchHistoryViewSet側で使う。
+# VI: Số lượng tối đa giữ lại trong lịch sử tìm kiếm (dùng cho hiển thị kiểu ngăn xếp
+#     theo thời gian). Dùng ở phía SearchHistoryViewSet.
+SEARCH_HISTORY_LIMIT = 50
+
+
+def suggest_topic_keyword(*, description: str) -> list[str]:
+    """
+    JA: 単語がわからないユーザーが曖昧な言葉で説明した内容から、AIに学習カテゴリ名の
+        候補を1〜5個提案させる。実際の検索は行わず、候補単語のリストだけを返す
+        (呼び出し側が別途 /api/topics/{id}/search/ を叩く想定)。
+    VI: Từ mô tả mơ hồ của user không nhớ tên chính xác, nhờ AI gợi ý 1-5 từ ứng viên
+        cho tên danh mục học tập. Không tự tìm kiếm, chỉ trả về danh sách từ ứng viên
+        (bên gọi tự dùng để gọi riêng /api/topics/{id}/search/).
+    """
+    description = (description or "").strip()
+    if not description:
+        raise ValidationError("description is required")
+
+    llm = get_llm()
+    messages = [
+        ChatMessage(role="system", content=_AI_SEARCH_SYSTEM_PROMPT),
+        ChatMessage(role="user", content=description),
+    ]
+    result = llm.chat(messages)
+
+    # JA: カンマ・読点・改行のいずれで区切られても対応し、重複を除きつつ順序維持、
+    #     最大5件に絞る。
+    # VI: Chấp nhận phân tách bằng dấu phẩy, dấu phẩy tiếng Nhật hoặc xuống dòng;
+    #     loại trùng nhưng giữ thứ tự, giới hạn tối đa 5 mục.
+    candidates = [c.strip() for c in re.split(r"[,、\n]", result.text) if c.strip()]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique[:5]

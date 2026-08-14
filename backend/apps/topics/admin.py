@@ -7,7 +7,7 @@ VI: Cho phép xem/thêm Topic/KnowledgeNode từ trang quản trị (dùng để
 
 from django.contrib import admin
 
-from .models import KnowledgeNode, Topic
+from .models import KnowledgeNode, SearchHistory, Topic
 
 
 @admin.register(Topic)
@@ -22,3 +22,10 @@ class KnowledgeNodeAdmin(admin.ModelAdmin):
     list_display = ["title", "topic", "origin_node", "created_at"]
     list_filter = ["topic__user"]
     search_fields = ["title", "content"]
+
+
+@admin.register(SearchHistory)
+class SearchHistoryAdmin(admin.ModelAdmin):
+    list_display = ["query", "user", "topic", "created_at"]
+    list_filter = ["user"]
+    search_fields = ["query"]
