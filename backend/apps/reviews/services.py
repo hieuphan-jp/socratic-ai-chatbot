@@ -97,9 +97,7 @@ def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
         elif schedule.repetitions == 2:
             schedule.interval_days = 6
         else:
-            schedule.interval_days = round(
-                schedule.interval_days * schedule.easiness_factor
-            )
+            schedule.interval_days = round(schedule.interval_days * schedule.easiness_factor)
 
     # easiness_factor の更新(SM-2の標準式)
     ef = schedule.easiness_factor + (
@@ -146,9 +144,7 @@ def record_review_result(attempt) -> ReviewSchedule:
     if attempt.node.origin_node is not None:
         response_time_seconds = None
         if attempt.completed_at and attempt.created_at:
-            response_time_seconds = int(
-                (attempt.completed_at - attempt.created_at).total_seconds()
-            )
+            response_time_seconds = int((attempt.completed_at - attempt.created_at).total_seconds())
         ReviewLog.objects.create(
             attempt=attempt,
             performance_rating=performance_rating,
@@ -175,7 +171,7 @@ def start_review(user, source_node: KnowledgeNode):
     - performance_rating の計算方法
         -> record_review_result() 側の責務であり、開始時点では関係ない
     """
-    from apps.learning.services import start_attempt  # アプリ間の循環importを避けるため関数内import
+    from apps.chat.services import start_attempt  # アプリ間の循環importを避けるため関数内import
 
     generated_node = generate_similar_problem(source_node)
     return start_attempt(user=user, node_id=generated_node.id)

@@ -24,6 +24,9 @@ export type ChatMessage = {
   id: string
   session: string
   parent_message: string | null
+  suggested_parent_id?: string | null
+  parent_confidence?: 'high' | 'low' | ''
+  parent_confirmed?: boolean
   sender: SenderType
   message_text: string
   is_hint: boolean
@@ -37,6 +40,9 @@ export type ChatSession = {
   id: string
   user: number
   title: string
+  knowledge_node?: number | null
+  hint_count?: number
+  completed_at?: string | null
   messages?: ChatMessage[]
   created_at: string
 }
@@ -54,7 +60,14 @@ export type StepNode = {
 export type SendMessagePayload = {
   message_text: string
   parent_message_id?: string | null
-  action_type: 'ANSWER' | 'CHANGE_METHOD'
+  action_type: 'ANSWER' | 'CHANGE_METHOD' | 'HINT' | 'COMPLETE'
+}
+
+// JA: 親ノード確認用ペイロード。ConfirmParentInputSerializer と対応。
+// VI: Payload xác nhận node cha, tương ứng ConfirmParentInputSerializer backend.
+export type ConfirmParentPayload = {
+  message_id: string
+  parent_message_id?: string | null
 }
 
 // JA: React Flow用のグラフデータ型。GET /api/chat-sessions/{id}/graph/ と対応。
@@ -78,8 +91,8 @@ export type FlowEdge = {
 export type GraphData = {
   nodes: FlowNode[]
   edges: FlowEdge[]
-  step_number: number      // JA: ステップ番号 / VI: Thứ tự bước (1, 2, 3...)
-  label: string            // JA: ステップの簡潔な概要 / VI: Tóm tắt ngắn gọn của bước
+  step_number?: number       // JA: ステップ番号 / VI: Thứ tự bước (1, 2, 3...)
+  label?: string            // JA: ステップの簡潔な概要 / VI: Tóm tắt ngắn gọn của bước
   parentId?: string        // JA: 親ステップID / VI: ID bước trước đó
   childrenIds?: string[]   // JA: 子ステップID群 / VI: Danh sách ID bước con (nếu có chia nhánh)
 }
