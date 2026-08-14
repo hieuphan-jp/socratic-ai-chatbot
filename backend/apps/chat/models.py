@@ -40,7 +40,7 @@ class ChatSession(BaseModel):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="attempts",
+        related_name="chat_sessions_for_node",
     )
 
     # JA: 間隔復習 (SM-2) 計算用の学習データ
