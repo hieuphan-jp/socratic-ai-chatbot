@@ -6,6 +6,7 @@ import type {
   ConfirmParentPayload,
   GraphData,
   Topic,
+  KnowledgeNodeSummary,
 } from '@/shared/types'
 
 export const chatApi = {
@@ -32,15 +33,26 @@ export const chatApi = {
     return res
   },
 
-  // 7. Topic一覧取得（知識ノードの保存先選択用）/ VI: Lấy danh sách Topic (để chọn nơi lưu knowledge node)
-  getTopics: async () => {
-    const res = await client.get<Topic[]>('/topics/')
+  // 7. ルート直下のTopic一覧取得(フォルダ階層のドリルダウン起点)
+  // VI: Lấy danh sách Topic ở gốc (điểm bắt đầu duyệt sâu dần theo cấp bậc thư mục)
+  getRootTopics: async () => {
+    const res = await client.get<Topic[]>('/topics/?parent=null')
     return res
   },
 
-  // 8. Topic新規作成 / VI: Tạo Topic mới
-  createTopic: async (name: string) => {
-    const res = await client.post<Topic>('/topics/', { name })
+  // 8. 指定Topic直下の子Topic・知識ノードを取得(フォルダを開く操作に相当)
+  // VI: Lấy Topic con và knowledge node trực thuộc Topic chỉ định (tương ứng thao tác mở thư mục)
+  getTopicChildren: async (topicId: string) => {
+    const res = await client.get<{ topics: Topic[]; nodes: KnowledgeNodeSummary[] }>(
+      `/topics/${topicId}/children/`
+    )
+    return res
+  },
+
+  // 9. Topic新規作成(parentIdを渡すと、そのTopic配下にネストした子Topicとして作成される)
+  // VI: Tạo Topic mới (truyền parentId sẽ tạo thành Topic con lồng dưới Topic đó)
+  createTopic: async (name: string, parentId?: string | null) => {
+    const res = await client.post<Topic>('/topics/', { name, parent: parentId ?? null })
     return res
   },
 

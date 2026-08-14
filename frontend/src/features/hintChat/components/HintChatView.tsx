@@ -17,9 +17,10 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { chatApi } from '../api/chatApi';
-import { useChatSessions, useTopics, useCreateTopic } from '../api/useChat';
+import { useChatSessions } from '../api/useChat';
+import { TopicFolderPicker } from './TopicFolderPicker';
 import { queryKeys } from '@/shared/api/queryKeys';
-import { Button, Input, Notice, ErrorText } from '@/shared/ui';
+import { Button, Notice, ErrorText } from '@/shared/ui';
 import type { ChatMessage, SendMessagePayload } from '@/shared/types';
 
 interface HintChatViewProps {
@@ -41,16 +42,11 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   // VI: ★State cho việc chọn Topic để lưu, khi COMPLETE một session chưa gắn
   //     knowledge_node. Session đã có sẵn node thì không hiện UI này.
   const [showSaveAsNode, setShowSaveAsNode] = useState(false);
-  const [selectedTopicId, setSelectedTopicId] = useState('');
-  const [newTopicName, setNewTopicName] = useState('');
   const [savedNodeTitle, setSavedNodeTitle] = useState<string | null>(null);
 
   const { data: sessions } = useChatSessions();
   const currentSession = sessions?.find((s) => String(s.id) === String(currentSessionId));
   const hasKnowledgeNode = Boolean(currentSession?.knowledge_node);
-
-  const { data: topics = [], isPending: isLoadingTopics } = useTopics();
-  const createTopicMutation = useCreateTopic();
 
   // JA: 親コンポーネントからのアクティブセッションID変更を監視 / VI: Đồng bộ session ID khi props thay đổi
   useEffect(() => {
@@ -269,17 +265,15 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       if (data.knowledge_node_title) {
         setSavedNodeTitle(data.knowledge_node_title);
         setShowSaveAsNode(false);
-        setSelectedTopicId('');
-        setNewTopicName('');
         queryClient.invalidateQueries({ queryKey: queryKeys.chat.all });
       }
     },
   });
 
   // JA: 「完了」ボタンのハンドラ。既にノードがあるセッションはそのままCOMPLETE、
-  //     ノード未設定ならTopic選択パネルを開く。
+  //     ノード未設定ならTopicフォルダ選択パネルを開く。
   // VI: Hàm xử lý nút "Hoàn thành". Session đã có node thì COMPLETE luôn,
-  //     chưa có node thì mở panel chọn Topic.
+  //     chưa có node thì mở panel chọn thư mục Topic.
   const handleCompleteClick = () => {
     if (!currentSessionId) return;
     if (hasKnowledgeNode) {
@@ -293,16 +287,10 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     setShowSaveAsNode(true);
   };
 
-  // JA: Topic選択パネルの確定ハンドラ。新規Topic名が入力されていれば先に作成する。
-  // VI: Hàm xử lý xác nhận panel chọn Topic. Nếu có nhập tên Topic mới thì tạo trước.
-  const handleConfirmSaveAsNode = async () => {
+  // JA: フォルダピッカーで保存先Topicが確定した時のハンドラ。
+  // VI: Hàm xử lý khi đã chốt Topic để lưu qua bộ chọn thư mục.
+  const handleSaveToTopic = (topicId: string) => {
     if (!currentSessionId) return;
-    let topicId = selectedTopicId;
-    if (!topicId && newTopicName.trim()) {
-      const created = await createTopicMutation.mutateAsync(newTopicName.trim());
-      topicId = created.id;
-    }
-    if (!topicId) return;
     sendMessageMutation.mutate({
       sessionId: currentSessionId,
       payload: {
@@ -396,64 +384,21 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                 padding: '12px 14px',
                 border: '1px solid #e5e7eb',
                 borderRadius: '8px',
-                display: 'grid',
-                gap: '8px',
               }}
             >
               <Notice>
-                保存先のTopicを選ぶか、新しいTopic名を入力してください /
-                Chọn Topic để lưu, hoặc nhập tên Topic mới
+                学習木のどのフォルダに保存するか選んでください（フォルダを開いて絞り込めます）/
+                Chọn lưu vào thư mục nào trong cây học tập (có thể mở thư mục để đi sâu hơn)
               </Notice>
-
-              {isLoadingTopics ? (
-                <Notice>読み込み中… / Đang tải…</Notice>
-              ) : topics.length > 0 ? (
-                <select
-                  value={selectedTopicId}
-                  onChange={(e) => {
-                    setSelectedTopicId(e.target.value);
-                    if (e.target.value) setNewTopicName('');
-                  }}
-                  style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #ccc' }}
-                >
-                  <option value="">既存のTopicから選択 / Chọn Topic có sẵn</option>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
-
-              <Input
-                placeholder="新しいTopic名 / Tên Topic mới"
-                value={newTopicName}
-                onChange={(e) => {
-                  setNewTopicName(e.target.value);
-                  if (e.target.value) setSelectedTopicId('');
-                }}
-              />
-
+              <div style={{ marginTop: '8px' }}>
+                <TopicFolderPicker
+                  onSelect={handleSaveToTopic}
+                  onCancel={() => setShowSaveAsNode(false)}
+                />
+              </div>
               {sendMessageMutation.isError && (
                 <ErrorText>{(sendMessageMutation.error as Error).message}</ErrorText>
               )}
-
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <Button
-                  type="button"
-                  onClick={handleConfirmSaveAsNode}
-                  disabled={
-                    (!selectedTopicId && !newTopicName.trim()) ||
-                    sendMessageMutation.isPending ||
-                    createTopicMutation.isPending
-                  }
-                >
-                  保存する / Lưu
-                </Button>
-                <Button type="button" onClick={() => setShowSaveAsNode(false)}>
-                  キャンセル / Hủy
-                </Button>
-              </div>
             </div>
           )}
 

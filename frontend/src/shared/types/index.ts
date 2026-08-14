@@ -74,6 +74,14 @@ export type Topic = {
   has_children: boolean
 }
 
+// JA: 検索・フォルダ表示用の軽量な知識ノード。KnowledgeNodeSummarySerializer と対応。
+// VI: Knowledge node dạng gọn dùng cho tìm kiếm/hiển thị thư mục. Tương ứng KnowledgeNodeSummarySerializer.
+export type KnowledgeNodeSummary = {
+  id: string
+  title: string
+  topic: string
+}
+
 export type StepNode = {
   id: string
   step_number: number
