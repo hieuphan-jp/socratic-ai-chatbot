@@ -36,9 +36,7 @@ class ChatSession(BaseModel):
 
 
 class Attempt(BaseModel):
-    chat_session = models.ForeignKey(
-        ChatSession, on_delete=models.CASCADE, related_name="attempts"
-    )
+    chat_session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="attempts")
     hint_count = models.PositiveIntegerField(default=0, help_text="ヒントを求めた回数")
     completed_at = models.DateTimeField(null=True, blank=True, help_text="完了した日時")
 
@@ -63,9 +61,7 @@ class ChatMessage(BaseModel):
         HIGH = "high", "High"
         LOW = "low", "Low"
 
-    session = models.ForeignKey(
-        ChatSession, on_delete=models.CASCADE, related_name="messages"
-    )
+    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
     parent_message = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -101,9 +97,7 @@ class ChatMessage(BaseModel):
     sender = models.CharField(max_length=10, choices=Sender.choices)
     message_text = models.TextField()
     is_hint = models.BooleanField(default=False)
-    node_type = models.CharField(
-        max_length=20, choices=NodeType.choices, default=NodeType.STEP
-    )
+    node_type = models.CharField(max_length=20, choices=NodeType.choices, default=NodeType.STEP)
 
     def __str__(self) -> str:
         return f"[{self.sender}] {self.message_text[:30]}"

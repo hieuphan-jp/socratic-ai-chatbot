@@ -40,9 +40,7 @@ def create_chat_session_for_node(*, user, node_id=None, title: str = "New Sessio
 
 
 def get_or_create_active_attempt(*, session: ChatSession) -> Attempt:
-    attempt = (
-        session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
-    )
+    attempt = session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
     if attempt is None:
         attempt = Attempt.objects.create(chat_session=session)
     return attempt
@@ -112,9 +110,7 @@ def send_message_and_get_ai_response(
         raise ValidationError("メッセージ内容は必須です / Nội dung tin nhắn là bắt buộc")
 
     if action_type in ("HINT", "COMPLETE"):
-        record_hint_or_completion(
-            session=session, action_type=action_type, understood=understood
-        )
+        record_hint_or_completion(session=session, action_type=action_type, understood=understood)
 
     parent_msg = None
     if parent_message_id:

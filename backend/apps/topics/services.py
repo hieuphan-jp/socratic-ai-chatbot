@@ -69,9 +69,7 @@ def build_learning_tree(*, user) -> list[dict]:
         không còn cần nữa.
     """
     topics = list(Topic.objects.filter(user=user).order_by("position", "created_at"))
-    nodes = list(
-        KnowledgeNode.objects.filter(topic__user=user).order_by("created_at")
-    )
+    nodes = list(KnowledgeNode.objects.filter(topic__user=user).order_by("created_at"))
 
     nodes_by_topic: dict[str, list[KnowledgeNode]] = {}
     for node in nodes:

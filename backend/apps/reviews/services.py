@@ -44,9 +44,7 @@ def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
         elif schedule.repetitions == 2:
             schedule.interval_days = 6
         else:
-            schedule.interval_days = round(
-                schedule.interval_days * schedule.easiness_factor
-            )
+            schedule.interval_days = round(schedule.interval_days * schedule.easiness_factor)
 
     ef = schedule.easiness_factor + (
         0.1 - (5 - performance_rating) * (0.08 + (5 - performance_rating) * 0.02)
@@ -86,9 +84,7 @@ def record_review_result(attempt, understood: bool) -> ReviewSchedule:
 
     response_time_seconds = None
     if attempt.completed_at and attempt.created_at:
-        response_time_seconds = int(
-            (attempt.completed_at - attempt.created_at).total_seconds()
-        )
+        response_time_seconds = int((attempt.completed_at - attempt.created_at).total_seconds())
 
     ReviewLog.objects.create(
         attempt=attempt,
