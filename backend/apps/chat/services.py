@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Any, Dict
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
@@ -12,7 +13,6 @@ from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
 from apps.ai.base import ChatMessage as AIChatMessage
 from apps.ai.base import ChatResult
 from apps.ai.client import get_llm
-from apps.common.exceptions import ValidationError
 from apps.reviews.models import ReviewLog
 from apps.topics.models import KnowledgeNode
 
@@ -20,7 +20,7 @@ from .models import ChatMessage, ChatSession
 
 logger = logging.getLogger(__name__)
 
-# JA: ★家庭教師としての役割をより明確に指示。ヒント段階的に導き、直接の答えは出さない。
+# JA: ★家庭教師としての役割をより明確に指示。ヒントを段階的に導き、直接の答えは出さない。
 # VI: ★Chỉ thị rõ ràng hơn vai trò gia sư. Dẫn dắt bằng gợi ý từng bước, không đưa thẳng đáp án.
 SYSTEM_PROMPT = """
 You are an AI Tutor helping a student learn step by step.
@@ -33,6 +33,28 @@ STRICT RULES:
 5. You have access to the full conversation history below (previous questions and your previous replies).
    Use it to stay consistent and to correctly recall anything the user or you mentioned earlier.
 6. Keep responses concise (a few sentences), conversational, and encouraging.
+"""
+
+# JA: 分岐推定およびAI Tutor用のシステムプロンプト定義（Option 1）
+# VI: Định nghĩa system prompt cho AI Tutor và đoán nhánh tư duy (Option 1)
+BRANCHING_SYSTEM_PROMPT = """
+あなたは学習者を指導する AI Tutor です。
+ユーザーの質問に対してヒントを提供すると同時に、思考ツリーの分岐先（親ノード）を正確に推定してください。
+
+【重要：分岐判定ガイドライン / Quy tắc phát hiện rẽ nhánh】
+ユーザーの最新の質問について、以下の条件をチェックしてください：
+1. **話題の切り替え・復帰**: ユーザーが直前の会話（N-1）を連続して深掘りせず、過去の質問（N-2, N-3...）の話題に戻っているか？
+2. **参照単語の検知**: 「さっきの〜」「最初の〜」「〜についてだけど」「chủ đề trước...」「câu đầu tiên...」「nãy bạn nói...」などの過去を参照するキーワードが含まれているか？
+3. **文脈の断絶**: 直前の会話と最新の質問のトピックが完全に切れているか？
+
+【出力フォーマット / Format đầu ra】
+必ず以下の JSON フォーマットのみで返答してください。余計なテキストや Markdown コードブロックを含めないでください。
+
+{
+  "answer": "ユーザーへのヒント回答 / Lời thoại trả lời cho User",
+  "suggested_parent_id": "最も関連性の高い過去の USER メッセージの UUID (分岐がない場合は null) / UUID của câu hỏi USER tương ứng trong quá khứ nếu rẽ nhánh, ngược lại là null",
+  "confidence": "high | medium | low"
+}
 """
 
 NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
@@ -124,26 +146,6 @@ def _extract_json(raw_text: str) -> dict | None:
     return None
 
 
-def _build_node_summaries(session: ChatSession) -> list[dict]:
-    """
-    JA: 全メッセージ（User/AI）を対象に分岐推定用の要約リストを作成する。
-    VI: Lấy tất cả tin nhắn trong phiên (cả User và AI) để AI có thể rẽ nhánh từ câu hỏi/câu trả lời bất kỳ.
-    """
-    all_msgs = (
-        session.messages.all()
-        .order_by("created_at")[:15]  # Lấy tối đa 15 node gần nhất để tiết kiệm token
-    )
-    summaries = []
-    for msg in all_msgs:
-        sender_label = "User" if msg.sender == ChatMessage.Sender.USER else "AI"
-        summaries.append({
-            "id": str(msg.id),
-            "sender": sender_label,
-            "text": msg.message_text[:NODE_TOPIC_MAX_LEN]
-        })
-    return summaries
-
-
 def _build_history_messages(session: ChatSession) -> list[AIChatMessage]:
     """
     JA: これまでの会話履歴を AIChatMessage のリストに変換し、AI に渡す。
@@ -157,24 +159,34 @@ def _build_history_messages(session: ChatSession) -> list[AIChatMessage]:
         history.append(AIChatMessage(role=role, content=content))
     return history
 
-def _build_branching_instructions(node_summaries: list[dict], action_type: str, text: str) -> str:
+
+def _build_branching_instructions(user_nodes: list, text: str) -> str:
     """
-    JA: 分岐推定の指示文（直前のノードではなく、過去の古いノードへの分岐のみを検出）
-    VI: Chỉ thị đoán nhánh (Chỉ phát hiện khi user quay lại rẽ nhánh từ một node cũ hơn node ngay trước đó)
+    JA: ノードインデックス形式で過去の質問履歴を整形（Option 2）。
+        直前のノードではなく、過去の古いノードへの分岐のみを明確に検出させる。
+    VI: Format lịch sử câu hỏi USER theo dạng Node Index kèm UUID (Option 2).
+        Chỉ thị AI nhận biết khi user quay lại rẽ nhánh từ một node cũ hơn node ngay liền trước.
     """
-    steps_json = json.dumps(node_summaries, ensure_ascii=False)
+    history_formatted = []
+    for idx, msg in enumerate(user_nodes, start=1):
+        history_formatted.append(f"- [Node ID: {msg.id}] (Bước {idx}): {msg.message_text[:NODE_TOPIC_MAX_LEN]}")
+
+    history_str = "\n".join(history_formatted) if history_formatted else "Không có câu hỏi cũ nào."
+
     return f"""
-LIST OF PREVIOUS USER QUESTIONS (id and text):
-{steps_json}
+{BRANCHING_SYSTEM_PROMPT}
 
-NEW USER QUESTION: "{text}"
+=== LỊCH SỬ CÁC CÂU HỎI TRƯỚC ĐÂY CỦA USER (TỪ CŨ ĐẾN MỚI) ===
+{history_str}
 
-TASK: Analyze if the NEW USER QUESTION is asking about or continuing an OLDER topic from the list above (instead of the most recent question).
-- If the new question clearly branches off an OLDER question from the list, set "suggested_parent_id" to that older question's id, and set "confidence" to "high".
-- If it is just a natural continuation of the MOST RECENT question, set "suggested_parent_id" to null and "confidence" to "low".
+=== CÂU HỎI MỚI NHẤT CỦA USER ===
+"{text}"
 
-OUTPUT FORMAT (STRICT JSON ONLY, NO MARKDOWN, NO EXTRA TEXT):
-{{"suggested_parent_id": "<id_of_older_question_or_null>", "confidence": "high_or_low", "answer": "<your tutor response to the student>"}}
+=== YÊU CẦU / INSTRUCTIONS ===
+1. So sánh CÂU HỎI MỚI NHẤT với LỊCH SỬ CÁC CÂU HỎI TRƯỚC ĐÂY.
+2. Nếu CÂU HỎI MỚI NHẤT đang muốn hỏi nối tiếp hoặc rẽ nhánh từ một [Node ID] cũ hơn (từ Bước 1 đến Bước N-2) thay vì câu liền trước (Bước N-1), hãy gán chuỗi UUID của [Node ID] đó vào `suggested_parent_id` và đặt `confidence` thành "high".
+3. Nếu chỉ là câu hỏi tiếp nối tự nhiên của câu liền trước (Bước N-1), hãy gán `suggested_parent_id` là null và `confidence` là "low".
+4. Trả về đúng định dạng JSON yêu cầu.
 """
 
 
@@ -202,13 +214,8 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
             logger.error("Lỗi tạo phản hồi AI: %s", e)
             return f"[AI Tutor] Lỗi: {str(e)}", None, "", True
 
-    # Tạo danh sách các câu hỏi cũ để AI so sánh rẽ nhánh
-    node_summaries = [
-        {"id": str(msg.id), "text": msg.message_text[:NODE_TOPIC_MAX_LEN]}
-        for msg in user_nodes
-    ]
-
-    branching_instructions = _build_branching_instructions(node_summaries, action_type, text)
+    # Build prompt đoán nhánh nâng cao (Option 1 + Option 2)
+    branching_instructions = _build_branching_instructions(user_nodes, text)
     messages_payload = [
         AIChatMessage(role="system", content=SYSTEM_PROMPT),
         *history,
@@ -227,7 +234,7 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
             suggested_id = parsed.get("suggested_parent_id")
 
             # Chỉ chấp nhận suggested_parent nếu ID đó thực sự tồn tại trong DB
-            if suggested_id and suggested_id != "null":
+            if suggested_id and str(suggested_id).lower() != "null":
                 suggested_parent = ChatMessage.objects.filter(session=session, id=suggested_id).first()
 
             # Nếu AI tự tin rẽ nhánh về câu cũ (confidence == "high"), đặt parent_confirmed = False để hiện Confirm
@@ -239,6 +246,7 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
     except Exception as e:
         logger.error("Lỗi tạo phản hồi AI: %s", e)
         return f"[AI Tutor] Lỗi: {str(e)}", None, "", True
+
 
 def send_message_and_get_ai_response(
     *,
@@ -311,6 +319,13 @@ def send_message_and_get_ai_response(
 
 
 def confirm_message_parent(*, session: ChatSession, message_id, parent_message_id) -> ChatMessage:
+    """
+    JA: ユーザーが分岐先（親ノード）を確定または thay đổi するロジック。
+        parent_message_id と parent_message_id (DBカラム) の両方を確実に更新・保存する。
+    VI: Logic user xác nhận hoặc đổi node cha (rẽ nhánh).
+        Đảm bảo cập nhật và lưu cả mối quan hệ parent_message lẫn cột parent_message_id dưới DB.
+    """
+    # JA: 対象のユーザーメッセージを取得 / VI: Lấy tin nhắn của USER cần xác nhận
     message = ChatMessage.objects.filter(
         session=session, id=message_id, sender=ChatMessage.Sender.USER
     ).first()
@@ -318,16 +333,24 @@ def confirm_message_parent(*, session: ChatSession, message_id, parent_message_i
     if message is None:
         raise ValidationError("メッセージが見つかりません / Không tìm thấy tin nhắn")
 
+    # JA: parent_message_id が dict 型で渡された場合の bóc tách 処理 / VI: Xử lý bóc tách nếu truyền nhầm dạng Dict/Object
+    actual_parent_id = parent_message_id
+    if isinstance(parent_message_id, dict):
+        actual_parent_id = parent_message_id.get("id")
+
     parent = None
-    if parent_message_id:
-        parent = ChatMessage.objects.filter(session=session, id=parent_message_id).first()
+    if actual_parent_id:
+        parent = ChatMessage.objects.filter(session=session, id=actual_parent_id).first()
         if parent is None:
             raise ValidationError("親メッセージが見つかりません / Không tìm thấy tin nhắn cha")
 
-    # VI: Cập nhật parent_message mới, đánh dấu đã confirm và lưu DB
+    # JA: 親ノードの更新と確認フラグの設定 / VI: Cập nhật node cha và đánh dấu đã confirm
     message.parent_message = parent
     message.parent_confirmed = True
-    message.save(update_fields=["parent_message", "parent_confirmed"])
+    
+    # JA: ★重要：DBの parent_message_id カラムを確実に保存するために update_fields に chỉ định する
+    # VI: ★Quan trọng: Chỉ định rõ parent_message_id trong update_fields để ghi nhận xuống DB ngay lập tức
+    message.save(update_fields=["parent_message", "parent_message_id", "parent_confirmed"])
     
     return message
 

@@ -6,13 +6,16 @@ from .models import ChatMessage, ChatSession
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
+    # JA: ★親ノードのUUIDを bóc tách して返却するフィールド（read_only=True で安全化）
+    # VI: ★Trường bóc tách lấy UUID của parent_message trả về cho Frontend gọn nhẹ
     parent_message_id = serializers.UUIDField(
-        source="parent_message.id", allow_null=True, required=False
+        source="parent_message.id", allow_null=True, read_only=True
     )
-    # JA: ★フロントの確認UI用フィールド（分岐推定機能・復元）
-    # VI: ★Các field phục vụ UI xác nhận (tính năng đoán nhánh - khôi phục lại)
+    
+    # JA: ★フロントの確認UI用フィールド（分岐推定機能）
+    # VI: ★Các field phục vụ UI xác nhận (tính năng đoán nhánh)
     suggested_parent_id = serializers.UUIDField(
-        source="suggested_parent.id", allow_null=True, required=False, read_only=True
+        source="suggested_parent.id", allow_null=True, read_only=True
     )
     parent_confidence = serializers.CharField(read_only=True)
     parent_confirmed = serializers.BooleanField(read_only=True)
@@ -69,10 +72,8 @@ class SendMessageInputSerializer(serializers.Serializer):
     """
     JA: メッセージ送信リクエストの検証 (HINT / COMPLETE アクションに対応)
         ★parent_message_id は「ユーザーが明示的にこのノードに返信する」場合のみ指定する。
-          指定しない（null/未送信）場合、バックエンドが AI に分岐先を推定させる。
     VI: Validation request gửi tin nhắn (Hỗ trợ các action HINT và COMPLETE)
         ★parent_message_id CHỈ truyền khi user chủ động chọn "trả lời tiếp node này".
-          Nếu không truyền (null/bỏ trống), backend sẽ để AI tự đoán nhánh cha.
     """
 
     parent_message_id = serializers.UUIDField(required=False, allow_null=True)
