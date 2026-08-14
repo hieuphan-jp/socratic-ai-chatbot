@@ -1,16 +1,19 @@
 """
 apps/topics/services.py
 
-JA: 学習木構造の業務ロジック（HTTP非依存）。KnowledgeNode の構造(topic/origin_node/
-    title/content)への書き込みは、このモジュール経由に一本化する。他アプリ
-    (例: apps/reviews)がAI生成の類題ノードを作りたい場合も create_derived_node
-    を呼ぶこと。KnowledgeNode.objects.create を他アプリから直接呼ばない
-    （所有権はこのアプリにあるため）。
-VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Việc ghi vào cấu trúc
-    KnowledgeNode (topic/origin_node/title/content) gom về một mối qua module này.
-    App khác (vd: apps/reviews) muốn tạo node類題 do AI sinh cũng phải gọi
-    create_derived_node. Không gọi thẳng KnowledgeNode.objects.create từ app khác
-    (vì quyền sở hữu thuộc app này).
+JA: 学習木構造の業務ロジック(HTTP非依存)。KnowledgeNodeの構造
+    (topic/title/content)への書き込みは、このモジュール経由に一本化する。
+    【設計変更 2026-08-13】復習機能がAIによる類似問題生成をやめたため、
+    create_derived_node は廃止した。全てのKnowledgeNodeが常設ノードに
+    なったため、build_learning_tree の origin_node による絞り込みも
+    不要になった。
+VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Việc ghi vào
+    cấu trúc KnowledgeNode (topic/title/content) gom về một mối qua
+    module này.
+    【Thay đổi thiết kế 2026-08-13】Vì tính năng ôn tập không còn AI sinh
+    bài tương tự nữa, đã bỏ create_derived_node. Vì mọi KnowledgeNode giờ
+    đều là node cố định, việc lọc theo origin_node trong
+    build_learning_tree cũng không cần nữa.
 """
 
 from apps.common.exceptions import PermissionDenied, ValidationError
@@ -51,36 +54,21 @@ def create_knowledge_node(*, user, topic: Topic, title: str, content: str) -> Kn
     return KnowledgeNode.objects.create(topic=topic, title=title, content=content or "")
 
 
-def create_derived_node(*, origin_node: KnowledgeNode, title: str, content: str) -> KnowledgeNode:
-    """
-    JA: AI生成の類題ノードを作成する。origin_node が常設ノードであることは
-        呼び出し側(reviews)が保証する。
-    VI: Tạo node類題 do AI sinh. Việc origin_node là node cố định do phía gọi
-        (reviews) đảm bảo.
-    """
-    return KnowledgeNode.objects.create(
-        topic=origin_node.topic,
-        origin_node=origin_node,
-        title=(title or "").strip() or f"{origin_node.title}(類題)",
-        content=content or "",
-    )
-
-
 def build_learning_tree(*, user) -> list[dict]:
     """
-    JA: user配下の Topic階層 + 各Topicに属する KnowledgeNode(常設ノードのみ、
-        origin_node が NULL のもの)を、フロントの TreeNode 形式にまとめて返す。
-        AI生成の使い捨て類題ノード(origin_node が非NULL)は木に含めない。
-    VI: Gom cây phân cấp Topic của user + KnowledgeNode (chỉ node cố định,
-        origin_node là NULL) thuộc mỗi Topic, trả về theo định dạng TreeNode
-        của frontend. Không đưa node類題 dùng một lần do AI sinh (origin_node
-        khác NULL) vào cây.
+    JA: user配下の Topic階層 + 各Topicに属する KnowledgeNode を、フロントの
+        TreeNode形式にまとめて返す。
+        【設計変更】origin_nodeが廃止され全ノードが常設ノードになったため、
+        以前あった origin_node__isnull=True による絞り込みは不要になった。
+    VI: Gom cây phân cấp Topic của user + KnowledgeNode thuộc từng Topic,
+        trả về theo định dạng TreeNode của frontend.
+        【Thay đổi thiết kế】Vì origin_node đã bị xóa và mọi node đều là
+        node cố định, việc lọc theo origin_node__isnull=True trước đây
+        không còn cần nữa.
     """
     topics = list(Topic.objects.filter(user=user).order_by("position", "created_at"))
     nodes = list(
-        KnowledgeNode.objects.filter(topic__user=user, origin_node__isnull=True).order_by(
-            "created_at"
-        )
+        KnowledgeNode.objects.filter(topic__user=user).order_by("created_at")
     )
 
     nodes_by_topic: dict[str, list[KnowledgeNode]] = {}

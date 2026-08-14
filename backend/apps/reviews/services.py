@@ -1,25 +1,37 @@
 """
-JA: 間隔反復アルゴリズム(SM-2)の実装。問題文(KnowledgeNode)は復習のたびに
-    AIが新しく生成するが、復習スケジュール(ReviewSchedule)は生成された
-    使い捨てのノードではなく、その生成元となった「常設の概念ノード」
-    (origin_node)に対して更新する。このAIは正誤判定(is_correct)を行わ
-    ないため、performance_rating(0〜5)は Attempt.hint_count から算出する。
-VI: Triển khai thuật toán lặp lại ngắt quãng (SM-2). Nội dung bài toán
-    (KnowledgeNode) được AI tạo mới mỗi lần ôn tập, nhưng lịch ôn tập
-    (ReviewSchedule) được cập nhật vào "node khái niệm cố định"
-    (origin_node) sinh ra nó, chứ không phải node dùng một lần đó. Vì AI
-    này không chấm đúng/sai (is_correct), performance_rating (0-5) được
-    tính từ Attempt.hint_count.
+JA: 間隔反復アルゴリズム(SM-2)の実装。
+    【設計変更 2026-08-13 その1】復習はAIによる類題生成をやめ、知識ノードが
+    生まれた元のChatSession(1ノードにつき1セッション、OneToOne)に入り
+    直して続きを対話する形になった。generate_similar_problem・
+    resolve_schedule_nodeは廃止した。
+    【設計変更 2026-08-13 その2】1つのChatSessionを何度も復習に使い回す
+    ため、「何回目の復習か」を区別する apps.chat.models.Attempt
+    (ChatSessionへのFK、hint_count・completed_atを持つ)が新設された。
+    ReviewLogはこのAttemptを参照する。
+    【設計変更 2026-08-13 その3】performance_ratingはヒント使用数からで
+    はなく、ユーザー自身が「分かった/分からなかった」と自己申告する
+    understood(真偽値)から決める。連続で「分かった」と確認できた回数は
+    SM-2のrepetitionsがそのまま数えるので、別途カウンタは持たない。
+VI: Triển khai thuật toán lặp lại ngắt quãng (SM-2).
+    【Thay đổi thiết kế 2026-08-13, phần 1】Ôn tập không còn là AI sinh bài
+    tương tự mới, mà là mở lại ChatSession gốc (1 node ứng với 1 session,
+    OneToOne) và tiếp tục hội thoại ở đó. Đã bỏ generate_similar_problem/
+    resolve_schedule_node.
+    【Thay đổi thiết kế 2026-08-13, phần 2】Vì dùng lại 1 ChatSession nhiều
+    lần để ôn tập, nên đã thêm mới apps.chat.models.Attempt (FK tới
+    ChatSession, có hint_count/completed_at) để phân biệt "lần ôn tập thứ
+    mấy". ReviewLog tham chiếu Attempt này.
+    【Thay đổi thiết kế 2026-08-13, phần 3】performance_rating không tính
+    từ số lần dùng gợi ý, mà từ việc người dùng tự báo "đã hiểu/chưa hiểu"
+    (understood, boolean). Số lần liên tiếp xác nhận "đã hiểu" đã được
+    repetitions của SM-2 tự đếm, nên không cần thêm bộ đếm riêng.
 """
 
 from datetime import timedelta
 
 from django.utils import timezone
 
-from apps.ai.base import ChatMessage
-from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
-from apps.topics import services as topics_services
 from apps.topics.models import KnowledgeNode
 
 from .models import ReviewSchedule
@@ -27,59 +39,45 @@ from .models import ReviewSchedule
 MIN_EASINESS_FACTOR = 1.3
 PASSING_RATING = 3  # これ未満は「想起失敗」として扱う(SM-2の標準的な閾値)
 
-
-def resolve_schedule_node(node: KnowledgeNode) -> KnowledgeNode:
-    """
-    ReviewSchedule を持つべき常設ノードを返す。
-
-    node がAI生成の類題(origin_nodeを持つ)であれば、その元になった
-    常設ノードを返す。node自身が常設ノード(origin_nodeがNone)であれば、
-    そのまま自分自身を返す。
-    """
-    return node.origin_node or node
+# JA: understood(真偽値)をSM-2のperformance_rating(0〜5)へ単純変換する。
+#     0〜5の細かい粒度はもう使わないが、ReviewLog.performance_ratingの
+#     フィールド定義(0〜5のIntegerField)は変えずに済ませるため、この
+#     2値だけを割り当てている。
+# VI: Quy đổi đơn giản understood (boolean) sang performance_rating (0-5)
+#     của SM-2. Không còn dùng độ chi tiết 0-5 nữa, nhưng để không phải
+#     đổi định nghĩa field ReviewLog.performance_rating (IntegerField
+#     0-5), chỉ gán 2 giá trị này.
+RATING_UNDERSTOOD = 5
+RATING_NOT_UNDERSTOOD = 1
 
 
 def get_or_create_schedule(node: KnowledgeNode) -> ReviewSchedule:
     """
-    常設ノードの ReviewSchedule を取得する。まだ無ければ初期値で作成する
-    (トピックに新しいノードを追加した直後などは、まだ一度も復習して
-    いないので ReviewSchedule が存在しない)。
+    node の ReviewSchedule を取得する。まだ無ければ初期値で作成する
+    (ノード作成直後などは、まだ一度も学習していないので存在しない)。
     """
-    target_node = resolve_schedule_node(node)
-    schedule, _created = ReviewSchedule.objects.get_or_create(node=target_node)
+    schedule, _created = ReviewSchedule.objects.get_or_create(node=node)
     return schedule
 
 
-def rating_from_hint_count(hint_count: int) -> int:
+def rating_from_understood(understood: bool) -> int:
     """
-    ヒント使用数から performance_rating(0〜5)を算出する。
-
-    このAIは正誤判定を行わないため、completed_at が記録された Attempt は
-    「最終的には解決できた」ことを意味する。そのぶん、ヒントを何回
-    使ったかを記憶定着の強さの代理指標として使う。5回目以降は易しい
-    ヒントに切り替わる仕様(対話機能側)と閾値を揃えている。
+    ユーザーの自己申告(理解できたか)から performance_rating を決める。
     """
-    if hint_count <= 0:
-        return 5  # ヒントなしで完了 = 完全に定着
-    elif hint_count == 1:
-        return 4
-    elif hint_count <= 3:
-        return 3
-    elif hint_count <= 5:
-        return 2  # 易しいヒントへの切り替え境界
-    return 1  # 易しいヒントに切り替わってもなお多くの手順が必要だった
+    return RATING_UNDERSTOOD if understood else RATING_NOT_UNDERSTOOD
 
 
 def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
     """
-    SM-2アルゴリズムに基づき、常設ノードの ReviewSchedule を更新する。
+    SM-2アルゴリズムに基づき、node の ReviewSchedule を更新する。
 
     Args:
-        node: Attempt.node(AI生成の類題、または常設ノードそのもの)
+        node: 学習・復習の対象になったKnowledgeNode
         performance_rating: 0〜5の記憶定着度評価
+            (rating_from_understood()の出力を渡す想定)
 
     Returns:
-        実際に更新された ReviewSchedule(origin_nodeがあればそちら側)
+        更新された ReviewSchedule
     """
     if not 0 <= performance_rating <= 5:
         raise ValidationError("performance_rating must be between 0 and 5")
@@ -91,6 +89,10 @@ def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
         schedule.repetitions = 0
         schedule.interval_days = 1
     else:
+        # JA: ここでのrepetitions+1が、「連続で分かったと確認できた回数」の
+        #     カウントに相当する。
+        # VI: repetitions+1 ở đây chính là bộ đếm "số lần liên tiếp xác
+        #     nhận đã hiểu".
         schedule.repetitions += 1
         if schedule.repetitions == 1:
             schedule.interval_days = 1
@@ -126,97 +128,39 @@ def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
     return schedule
 
 
-def record_review_result(attempt) -> ReviewSchedule:
+def record_review_result(attempt, understood: bool) -> ReviewSchedule:
     """
-    Attempt完了時にチャット機能側から呼ばれるエントリーポイント。
+    Attempt完了時にチャット機能側(record_hint_or_completion)から
+    呼ばれるエントリーポイント。
 
-    performance_rating は外から受け取らず、attempt.hint_count から
-    このモジュール内で算出する(算出方法が変わっても呼び出し側の
-    コードには影響しない)。
+    Args:
+        attempt: 完了した apps.chat.models.Attempt(1回分の学習・復習の記録)
+        understood: ユーザーが「理解できた」と自己申告したかどうか
 
-    - attempt.node.origin_node がある(=AI生成の類題を解いた)場合のみ
-      ReviewLog を作成する。origin_node が無い(=常設ノードを直接解いた
-      = 対話機能での初回学習)場合は ReviewLog は作らず、SM-2の更新だけ行う。
-    - SM-2の更新自体は、初回学習・復習のどちらでも常に行う。
+    初回学習・復習(同じセッションへの再入場)のどちらでも、区別せず常に
+    ReviewLog を作成し SM-2 を更新する。
     """
     from .models import ReviewLog  # アプリ間の循環importを避けるため関数内import
 
-    performance_rating = rating_from_hint_count(attempt.hint_count)
-
-    if attempt.node.origin_node is not None:
-        response_time_seconds = None
-        if attempt.completed_at and attempt.created_at:
-            response_time_seconds = int(
-                (attempt.completed_at - attempt.created_at).total_seconds()
-            )
-        ReviewLog.objects.create(
-            attempt=attempt,
-            performance_rating=performance_rating,
-            response_time_seconds=response_time_seconds,
+    node = attempt.chat_session.knowledge_node
+    if node is None:
+        raise ValidationError(
+            "このセッションにはKnowledgeNodeが紐づいていません / "
+            "Session này chưa gắn với KnowledgeNode nào"
         )
 
-    return apply_sm2(attempt.node, performance_rating)
+    performance_rating = rating_from_understood(understood)
 
+    response_time_seconds = None
+    if attempt.completed_at and attempt.created_at:
+        response_time_seconds = int(
+            (attempt.completed_at - attempt.created_at).total_seconds()
+        )
 
-def start_review(user, source_node: KnowledgeNode):
-    """
-    間隔復習機能から、対話機能(チャットセッション)へ処理を引き継ぐ入口。
-
-    Attempt・ChatSession の作成はチャット機能側の責務なので、ここでは
-    生成した類題ノードを作ったうえで、チャット機能の start_attempt() に
-    「誰が(user)」「どのノードを解くか(node_id)」だけを渡す。
-
-    渡さないもの(あえて渡さない):
-    - 問題文・タイトルなどのノードの中身
-        -> チャット機能が node_id から自分で KnowledgeNode を取得すればよく、
-           二重に渡すと片方だけ更新されたときにズレる原因になる
-    - このAttemptが復習由来かどうかを示すフラグ
-        -> node.origin_node の有無で判定できるので不要
-    - performance_rating の計算方法
-        -> record_review_result() 側の責務であり、開始時点では関係ない
-    """
-    from apps.learning.services import start_attempt  # アプリ間の循環importを避けるため関数内import
-
-    generated_node = generate_similar_problem(source_node)
-    return start_attempt(user=user, node_id=generated_node.id)
-
-
-def generate_similar_problem(source_node: KnowledgeNode) -> KnowledgeNode:
-    """
-    source_node を基に、AIで類題を1件生成してDBに保存する。
-    生成したノードの origin_node は source_node を指す。
-
-    apps.ai.client.get_llm() 経由で呼ぶため、fake / gemini のどちらが
-    設定されていても呼び出し側(このコード)は変更不要。
-    """
-    llm = get_llm()
-    messages = [
-        ChatMessage(
-            role="system",
-            content=(
-                "あなたは学習アプリの問題作成アシスタントです。"
-                "与えられた元の課題と同じ概念・難易度を問う類題を1問作成してください。"
-                "1行目にタイトル、2行目以降に問題本文だけを出力してください。"
-                "前置きや解説は不要です。"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=f"元の課題タイトル: {source_node.title}\n元の課題本文:\n{source_node.content}",
-        ),
-    ]
-    result = llm.chat(messages)
-
-    lines = result.text.strip().splitlines()
-    title = lines[0].strip() if lines else f"{source_node.title}(類題)"
-    content = "\n".join(lines[1:]).strip() or result.text.strip()
-
-    # JA: KnowledgeNodeの構造への書き込みは topics アプリの責務なので、
-    #     直接 create せず services 経由で依頼する。
-    # VI: Ghi vào cấu trúc KnowledgeNode là trách nhiệm của app topics, nên
-    #     không create trực tiếp mà nhờ qua services của app đó.
-    return topics_services.create_derived_node(
-        origin_node=source_node,
-        title=title,
-        content=content,
+    ReviewLog.objects.create(
+        attempt=attempt,
+        performance_rating=performance_rating,
+        response_time_seconds=response_time_seconds,
     )
+
+    return apply_sm2(node, performance_rating)

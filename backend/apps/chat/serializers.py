@@ -1,7 +1,16 @@
-# JA: JSONシリアライズと入力検証 / VI: Tuần tự hóa JSON và kiểm tra đầu vào
+# JA: JSONシリアライズと入力検証
+#     【設計変更2026-08-13】hint_count/completed_atはChatSessionから
+#     Attemptへ移動したため、ChatSessionSerializerは現在進行中(または
+#     最新)のAttempt情報をcurrent_attemptとして返す。作成時はnode_idを
+#     受け取れるようにした(create_chat_session_for_node経由)。
+# VI: Tuần tự hóa JSON và kiểm tra đầu vào.
+#     【Thay đổi thiết kế 2026-08-13】hint_count/completed_at đã chuyển từ
+#     ChatSession sang Attempt, nên ChatSessionSerializer trả về thông
+#     tin Attempt hiện tại (hoặc mới nhất) dưới dạng current_attempt. Lúc
+#     tạo có thể nhận node_id (qua create_chat_session_for_node).
 from rest_framework import serializers
 
-from .models import ChatMessage, ChatSession
+from .models import Attempt, ChatMessage, ChatSession
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
@@ -24,13 +33,45 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "session", "created_at"]
 
 
+class AttemptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Attempt
+        fields = ["id", "hint_count", "completed_at", "created_at"]
+        read_only_fields = fields
+
+
 class ChatSessionSerializer(serializers.ModelSerializer):
     messages = ChatMessageSerializer(many=True, read_only=True)
+    knowledge_node = serializers.UUIDField(
+        source="knowledge_node_id", read_only=True, allow_null=True
+    )
+    # JA: 作成時だけ使う入力用フィールド。出力には出さない
+    # VI: Field chỉ dùng lúc tạo. Không xuất hiện ở output
+    node_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    # JA: 現在進行中(未完了)、無ければ最新のAttemptの情報
+    # VI: Attempt đang thực hiện (chưa hoàn thành), nếu không có thì lấy mới nhất
+    current_attempt = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatSession
-        fields = ["id", "user", "title", "messages", "created_at"]
-        read_only_fields = ["id", "user", "created_at"]
+        fields = [
+            "id",
+            "user",
+            "title",
+            "knowledge_node",
+            "node_id",
+            "current_attempt",
+            "messages",
+            "created_at",
+        ]
+        read_only_fields = ["id", "user", "knowledge_node", "current_attempt", "created_at"]
+
+    def get_current_attempt(self, obj):
+        attempt = (
+            obj.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
+            or obj.attempts.order_by("-created_at").first()
+        )
+        return AttemptSerializer(attempt).data if attempt else None
 
 
 class SendMessageInputSerializer(serializers.Serializer):
@@ -39,5 +80,10 @@ class SendMessageInputSerializer(serializers.Serializer):
     parent_message_id = serializers.UUIDField(required=False, allow_null=True)
     message_text = serializers.CharField(required=True)
     action_type = serializers.ChoiceField(
-        choices=["ANSWER", "REQUEST_CHANGE_METHOD"], default="ANSWER"
+        choices=["ANSWER", "REQUEST_CHANGE_METHOD", "HINT", "COMPLETE"], default="ANSWER"
     )
+    # JA: action_type="COMPLETE"のときだけ意味を持つ。ユーザーが「理解できた」
+    #     と自己申告したかどうか(間隔復習機能のSM-2評価に使われる)。
+    # VI: Chỉ có ý nghĩa khi action_type="COMPLETE". Người dùng tự báo có
+    #     "đã hiểu" hay không (dùng để đánh giá SM-2 ở tính năng ôn tập).
+    understood = serializers.BooleanField(required=False, default=False)

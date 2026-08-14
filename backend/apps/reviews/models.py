@@ -1,20 +1,31 @@
 """
 JA: 間隔反復のスケジュール(ReviewSchedule)と、復習した際の記録(ReviewLog)。
-    ReviewScheduleはKnowledgeNodeへの1:1で、「常設ノード」(origin_nodeを
-    持たないノード)にのみ意味を持つ。AI生成の使い捨て類題ノードは
-    ReviewScheduleを持たない(常に生成元のスケジュールを参照・更新する)。
+    【設計変更 2026-08-13 その1】復習はAIが新しい類題を生成する形ではなく、
+    知識ノードが生まれた元のChatSession(1ノードにつき1セッション)に入り
+    直して続きを対話する形に変わった。そのため「常設ノード/AI生成の
+    使い捨てノード」という区別(origin_node)はreviews側では使わなくなった。
+    ReviewScheduleはKnowledgeNode 1件につき1件、単純な1:1で持つ。
+    【設計変更 2026-08-13 その2】1つのChatSessionを何度も復習に使い回す
+    ため、「何回目の復習か」を区別する apps.chat.models.Attempt が新設
+    された。ReviewLogはChatSessionではなくこのAttemptを参照する。
 VI: Lịch ôn tập ngắt quãng (ReviewSchedule) và bản ghi mỗi lần ôn tập
-    (ReviewLog). ReviewSchedule có quan hệ 1:1 với KnowledgeNode, chỉ có ý
-    nghĩa với "node cố định" (node không có origin_node). Node類題 do AI
-    sinh ra dùng một lần thì không có ReviewSchedule riêng (luôn tham
-    chiếu/cập nhật lịch của node gốc).
+    (ReviewLog). 【Thay đổi thiết kế 2026-08-13, phần 1】Ôn tập không còn
+    là AI sinh bài tương tự mới, mà là mở lại ChatSession gốc (1 node ứng
+    với 1 session) và tiếp tục hội thoại ở đó. Vì vậy sự phân biệt "node
+    cố định / node dùng một lần do AI sinh" (origin_node) không còn được
+    dùng ở phía reviews nữa. ReviewSchedule có quan hệ 1:1 đơn giản với
+    từng KnowledgeNode.
+    【Thay đổi thiết kế 2026-08-13, phần 2】Vì dùng lại 1 ChatSession
+    nhiều lần để ôn tập, nên đã thêm mới apps.chat.models.Attempt để phân
+    biệt "lần ôn tập thứ mấy". ReviewLog tham chiếu Attempt này thay vì
+    ChatSession.
 """
 
 from django.db import models
 from django.utils import timezone
 
+from apps.chat.models import Attempt
 from apps.common.models import BaseModel
-from apps.learning.models import Attempt
 from apps.topics.models import KnowledgeNode
 
 
@@ -23,7 +34,6 @@ class ReviewSchedule(BaseModel):
         KnowledgeNode,
         on_delete=models.CASCADE,
         related_name="review_schedule",
-        help_text="常設ノード(origin_nodeを持たないノード)であること",
     )
 
     # --- 間隔反復アルゴリズム(SM-2)用フィールド ---
@@ -83,6 +93,14 @@ class ReviewSchedule(BaseModel):
 
 
 class ReviewLog(BaseModel):
+    # JA: apps.chat.models.Attempt(1回分の学習・復習の記録)を参照する。
+    #     1つのChatSessionを何度も復習に使い回すため、ChatSessionを直接
+    #     指すと「何回目の復習か」を区別できなくなる(2回目の記録が1回目を
+    #     上書きしてしまう)。Attemptがその区別を担う。
+    # VI: Tham chiếu apps.chat.models.Attempt (bản ghi cho 1 lần học/ôn
+    #     tập). Vì dùng lại 1 ChatSession nhiều lần để ôn tập, nếu trỏ
+    #     thẳng vào ChatSession sẽ không phân biệt được "lần ôn tập thứ
+    #     mấy" (lần 2 sẽ ghi đè lần 1). Attempt đảm nhiệm việc phân biệt đó.
     attempt = models.ForeignKey(
         Attempt,
         on_delete=models.CASCADE,
@@ -90,7 +108,7 @@ class ReviewLog(BaseModel):
     )
     performance_rating = models.IntegerField(
         choices=[(i, str(i)) for i in range(6)],
-        help_text="hint_countから算出した0〜5の記憶定着度評価",
+        help_text="ユーザーの自己申告(理解できたか)から算出した0〜5の記憶定着度評価",
     )
     response_time_seconds = models.PositiveIntegerField(null=True, blank=True)
 

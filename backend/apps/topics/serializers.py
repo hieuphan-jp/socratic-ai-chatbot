@@ -22,7 +22,7 @@ class TopicSerializer(serializers.ModelSerializer):
 class KnowledgeNodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = KnowledgeNode
-        fields = ["id", "topic", "origin_node", "title", "content", "created_at"]
-        # JA: origin_node は AI生成専用(create_derived_node)が設定 → read_only
-        # VI: origin_node chỉ do create_derived_node (AI sinh) thiết lập → read_only
-        read_only_fields = ["id", "origin_node", "created_at"]
+        fields = ["id", "topic", "title", "content", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
