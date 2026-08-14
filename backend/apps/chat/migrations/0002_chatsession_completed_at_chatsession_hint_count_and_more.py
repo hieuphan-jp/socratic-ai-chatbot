@@ -5,26 +5,31 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('chat', '0001_initial'),
-        ('topics', '0001_initial'),
+        ("chat", "0001_initial"),
+        ("topics", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='chatsession',
-            name='completed_at',
-            field=models.DateTimeField(blank=True, help_text='Thời gian hoàn thành', null=True),
+            model_name="chatsession",
+            name="completed_at",
+            field=models.DateTimeField(blank=True, help_text="Thời gian hoàn thành", null=True),
         ),
         migrations.AddField(
-            model_name='chatsession',
-            name='hint_count',
-            field=models.IntegerField(default=0, help_text='Số lần xin gợi ý'),
+            model_name="chatsession",
+            name="hint_count",
+            field=models.IntegerField(default=0, help_text="Số lần xin gợi ý"),
         ),
         migrations.AddField(
-            model_name='chatsession',
-            name='knowledge_node',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='attempts', to='topics.knowledgenode'),
+            model_name="chatsession",
+            name="knowledge_node",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="attempts",
+                to="topics.knowledgenode",
+            ),
         ),
     ]

@@ -2,6 +2,7 @@
 # VI: Tuần tự hóa JSON và kiểm tra đầu vào (Tích hợp KNOWLEDGE_NODE, ReviewLog + xác nhận đoán nhánh)
 
 from rest_framework import serializers
+
 from .models import ChatMessage, ChatSession
 
 
@@ -11,7 +12,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     parent_message_id = serializers.UUIDField(
         source="parent_message.id", allow_null=True, read_only=True
     )
-    
+
     # JA: ★フロントの確認UI用フィールド（分岐推定機能）
     # VI: ★Các field phục vụ UI xác nhận (tính năng đoán nhánh)
     suggested_parent_id = serializers.UUIDField(

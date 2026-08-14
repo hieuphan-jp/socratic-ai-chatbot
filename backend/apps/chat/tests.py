@@ -2,10 +2,11 @@
 # JA: 分岐機能の単体テスト (API quotaを消費せずにDBとロジックを検証)
 # VI: Unit Test tính năng rẽ nhánh (Kiểm tra DB & logic không tốn API quota)
 
-from django.test import TestCase
 from django.contrib.auth import get_user_model
-from apps.chat.models import ChatSession, ChatMessage
+from django.test import TestCase
+
 from apps.chat import services
+from apps.chat.models import ChatMessage, ChatSession
 
 User = get_user_model()
 

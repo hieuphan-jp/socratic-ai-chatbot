@@ -3,12 +3,10 @@
 import json
 import logging
 import re
-from typing import Any, Dict
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-
-from apps.ai.base import ChatMessage as AIChatMessage, ChatResult
 
 from apps.ai.base import ChatMessage as AIChatMessage
 from apps.ai.base import ChatResult
@@ -64,7 +62,9 @@ MAX_HISTORY_MESSAGES = 20
 HISTORY_MESSAGE_MAX_LEN = 600
 
 
-def create_chat_session_for_node(*, user, node_id: int = None, title: str = "New Study Session") -> ChatSession:
+def create_chat_session_for_node(
+    *, user, node_id: int = None, title: str = "New Study Session"
+) -> ChatSession:
     """
     JA: 指定された KnowledgeNode に基づいて ChatSession (Attempt) を作成
     VI: Tạo ChatSession (Attempt) mới dựa trên KnowledgeNode được chỉ định
@@ -86,7 +86,9 @@ def create_chat_session_for_node(*, user, node_id: int = None, title: str = "New
     return session
 
 
-def record_hint_or_completion(*, session: ChatSession, action_type: str, response_time_seconds: int = 60):
+def record_hint_or_completion(
+    *, session: ChatSession, action_type: str, response_time_seconds: int = 60
+):
     """
     JA: ヒントカウントの更新および学習完了時 (COMPLETE) の ReviewLog 作成
     VI: Cập nhật hint_count và tự động tạo ReviewLog khi hoàn thành (COMPLETE)
@@ -117,7 +119,11 @@ def record_hint_or_completion(*, session: ChatSession, action_type: str, respons
             performance_rating=rating,
             response_time_seconds=response_time_seconds,
         )
-        logger.info("JA: ReviewLog を作成しました (Rating: %s) / VI: Đã tạo ReviewLog (Rating: %s)", rating, rating)
+        logger.info(
+            "JA: ReviewLog を作成しました (Rating: %s) / VI: Đã tạo ReviewLog (Rating: %s)",
+            rating,
+            rating,
+        )
         return review_log
 
     return None
@@ -169,7 +175,9 @@ def _build_branching_instructions(user_nodes: list, text: str) -> str:
     """
     history_formatted = []
     for idx, msg in enumerate(user_nodes, start=1):
-        history_formatted.append(f"- [Node ID: {msg.id}] (Bước {idx}): {msg.message_text[:NODE_TOPIC_MAX_LEN]}")
+        history_formatted.append(
+            f"- [Node ID: {msg.id}] (Bước {idx}): {msg.message_text[:NODE_TOPIC_MAX_LEN]}"
+        )
 
     history_str = "\n".join(history_formatted) if history_formatted else "Không có câu hỏi cũ nào."
 
@@ -196,8 +204,7 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
 
     # Lấy tất cả các câu hỏi cũ của USER trong session
     user_nodes = list(
-        session.messages.filter(sender=ChatMessage.Sender.USER)
-        .order_by("created_at")
+        session.messages.filter(sender=ChatMessage.Sender.USER).order_by("created_at")
     )
 
     # NẾU MỚI CHỈ CÓ 0 HOẶC 1 CÂU HỎI USER: Không cần đoán nhánh (tránh hiện Confirm thừa ở câu đầu)
@@ -235,7 +242,9 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
 
             # Chỉ chấp nhận suggested_parent nếu ID đó thực sự tồn tại trong DB
             if suggested_id and str(suggested_id).lower() != "null":
-                suggested_parent = ChatMessage.objects.filter(session=session, id=suggested_id).first()
+                suggested_parent = ChatMessage.objects.filter(
+                    session=session, id=suggested_id
+                ).first()
 
             # Nếu AI tự tin rẽ nhánh về câu cũ (confidence == "high"), đặt parent_confirmed = False để hiện Confirm
             parent_confirmed = False if (parent_confidence == "high" and suggested_parent) else True
@@ -254,7 +263,7 @@ def send_message_and_get_ai_response(
     user_message_text: str = "",
     parent_message_id: str = None,
     action_type: str = "ANSWER",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     text = (user_message_text or "").strip()
 
     if action_type in NEEDS_AI_ANSWER and not text:
@@ -274,7 +283,9 @@ def send_message_and_get_ai_response(
     if action_type == "HINT":
         ai_text = f"Gợi ý #{session.hint_count}: Hãy tập trung vào định nghĩa cốt lõi của bài học."
     elif action_type == "COMPLETE":
-        ai_text = "Bài học đã hoàn thành! Hệ thống đã tự động lưu kết quả ôn tập vào lịch sử của bạn."
+        ai_text = (
+            "Bài học đã hoàn thành! Hệ thống đã tự động lưu kết quả ôn tập vào lịch sử của bạn."
+        )
     else:
         ai_text, suggested_parent, parent_confidence, parent_confirmed = _generate_ai_answer(
             session=session, explicit_parent=explicit_parent, action_type=action_type, text=text
@@ -329,7 +340,7 @@ def confirm_message_parent(*, session: ChatSession, message_id, parent_message_i
     message = ChatMessage.objects.filter(
         session=session, id=message_id, sender=ChatMessage.Sender.USER
     ).first()
-    
+
     if message is None:
         raise ValidationError("メッセージが見つかりません / Không tìm thấy tin nhắn")
 
@@ -347,15 +358,15 @@ def confirm_message_parent(*, session: ChatSession, message_id, parent_message_i
     # JA: 親ノードの更新と確認フラグの設定 / VI: Cập nhật node cha và đánh dấu đã confirm
     message.parent_message = parent
     message.parent_confirmed = True
-    
+
     # JA: ★重要：DBの parent_message_id カラムを確実に保存するために update_fields に chỉ định する
     # VI: ★Quan trọng: Chỉ định rõ parent_message_id trong update_fields để ghi nhận xuống DB ngay lập tức
     message.save(update_fields=["parent_message", "parent_message_id", "parent_confirmed"])
-    
+
     return message
 
 
-def get_session_graph_data(*, session: ChatSession) -> Dict[str, Any]:
+def get_session_graph_data(*, session: ChatSession) -> dict[str, Any]:
     messages = session.messages.all().order_by("created_at")
     nodes = []
     edges = []
@@ -371,7 +382,9 @@ def get_session_graph_data(*, session: ChatSession) -> Dict[str, Any]:
                 "created_at": msg.created_at.isoformat(),
                 "parent_confirmed": msg.parent_confirmed,
                 "parent_confidence": msg.parent_confidence,
-                "suggested_parent_id": str(msg.suggested_parent_id) if msg.suggested_parent_id else None,
+                "suggested_parent_id": str(msg.suggested_parent_id)
+                if msg.suggested_parent_id
+                else None,
             }
         )
         if msg.parent_message_id:

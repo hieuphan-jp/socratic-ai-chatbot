@@ -5,25 +5,39 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('chat', '0002_chatsession_completed_at_chatsession_hint_count_and_more'),
+        ("chat", "0002_chatsession_completed_at_chatsession_hint_count_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='chatmessage',
-            name='parent_confidence',
-            field=models.CharField(blank=True, choices=[('high', 'High'), ('low', 'Low')], help_text='JA: 親ノード推定の確信度 / VI: Độ tin cậy của việc đoán node cha', max_length=10),
+            model_name="chatmessage",
+            name="parent_confidence",
+            field=models.CharField(
+                blank=True,
+                choices=[("high", "High"), ("low", "Low")],
+                help_text="JA: 親ノード推定の確信度 / VI: Độ tin cậy của việc đoán node cha",
+                max_length=10,
+            ),
         ),
         migrations.AddField(
-            model_name='chatmessage',
-            name='parent_confirmed',
-            field=models.BooleanField(default=True, help_text='JA: True=親ノードが確定済み（ユーザー明示指定 or 確認済み）。False=AI推定のみで未確認、フロントで確認UIを出す必要あり。 VI: True=node cha đã chốt (user tự chọn hoặc đã confirm). False=mới chỉ là AI đoán, chưa confirm, frontend cần hiện UI xác nhận.'),
+            model_name="chatmessage",
+            name="parent_confirmed",
+            field=models.BooleanField(
+                default=True,
+                help_text="JA: True=親ノードが確定済み（ユーザー明示指定 or 確認済み）。False=AI推定のみで未確認、フロントで確認UIを出す必要あり。 VI: True=node cha đã chốt (user tự chọn hoặc đã confirm). False=mới chỉ là AI đoán, chưa confirm, frontend cần hiện UI xác nhận.",
+            ),
         ),
         migrations.AddField(
-            model_name='chatmessage',
-            name='suggested_parent',
-            field=models.ForeignKey(blank=True, help_text='JA: AIが推定した親ノード / VI: Node cha do AI đề xuất', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='chat.chatmessage'),
+            model_name="chatmessage",
+            name="suggested_parent",
+            field=models.ForeignKey(
+                blank=True,
+                help_text="JA: AIが推定した親ノード / VI: Node cha do AI đề xuất",
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to="chat.chatmessage",
+            ),
         ),
     ]

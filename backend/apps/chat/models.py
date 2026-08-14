@@ -66,9 +66,7 @@ class ChatMessage(BaseModel):
         HIGH = "high", "High"
         LOW = "low", "Low"
 
-    session = models.ForeignKey(
-        ChatSession, on_delete=models.CASCADE, related_name="messages"
-    )
+    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
     parent_message = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -110,9 +108,7 @@ class ChatMessage(BaseModel):
     sender = models.CharField(max_length=10, choices=Sender.choices)
     message_text = models.TextField()
     is_hint = models.BooleanField(default=False)
-    node_type = models.CharField(
-        max_length=20, choices=NodeType.choices, default=NodeType.STEP
-    )
+    node_type = models.CharField(max_length=20, choices=NodeType.choices, default=NodeType.STEP)
 
     def __str__(self) -> str:
         return f"[{self.sender}] {self.message_text[:30]}"
