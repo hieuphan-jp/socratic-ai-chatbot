@@ -39,8 +39,14 @@ class TopicViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Gene
             has_nodes=Exists(has_nodes),
         )
         # JA: 検索セッションの起点(ルートTopicのみ)を取得するためのオプション絞り込み。
-        # VI: Lọc tùy chọn để lấy điểm bắt đầu phiên tìm kiếm (chỉ Topic gốc).
-        if self.request.query_params.get("parent") == "null":
+        #     list アクション限定。children/search/retrieveはself.get_object()経由で
+        #     このget_queryset()を共有するため、ここで絞ると「クエリに?parent=nullが
+        #     付いていた」だけで本来アクセスできる自分のTopicが404になってしまう。
+        # VI: Lọc tùy chọn để lấy điểm bắt đầu phiên tìm kiếm (chỉ Topic gốc). Chỉ áp
+        #     dụng cho action list. children/search/retrieve dùng chung get_queryset()
+        #     này qua self.get_object(), nếu lọc ở đây thì chỉ vì query có ?parent=null
+        #     mà Topic của chính mình (đáng lẽ truy cập được) sẽ bị trả về 404.
+        if self.action == "list" and self.request.query_params.get("parent") == "null":
             queryset = queryset.filter(parent__isnull=True)
         return queryset
 

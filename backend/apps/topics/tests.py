@@ -115,3 +115,18 @@ class SearchSessionTests(TestCase):
         self.client.force_login(self.other)
         resp = self.client.get(f"/api/knowledge-nodes/{self.n1.id}/")
         self.assertEqual(resp.status_code, 404)
+
+    def test_children_ignores_stray_parent_null_query_param(self):
+        # JA: get_queryset()のlist向け絞り込み(?parent=null)がchildren/searchにまで
+        #     波及すると、parentを持つTopic(algebra)へのアクセスが誤って404になる。
+        #     この回帰を防ぐ。
+        # VI: Nếu bộ lọc ?parent=null (dành cho list) lan sang children/search, việc
+        #     truy cập Topic có parent (algebra) sẽ bị 404 nhầm. Test này chặn hồi quy đó.
+        resp = self.client.get(f"/api/topics/{self.algebra.id}/children/?parent=null")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_search_ignores_stray_parent_null_query_param(self):
+        resp = self.client.get(f"/api/topics/{self.algebra.id}/search/?q=一次&parent=null")
+        self.assertEqual(resp.status_code, 200)
+        titles = [n["title"] for n in resp.json()]
+        self.assertEqual(titles, ["一次方程式の基礎"])
