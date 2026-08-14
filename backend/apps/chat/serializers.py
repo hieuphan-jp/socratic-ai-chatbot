@@ -45,11 +45,7 @@ class ChatSessionSerializer(serializers.ModelSerializer):
     knowledge_node = serializers.UUIDField(
         source="knowledge_node_id", read_only=True, allow_null=True
     )
-    # JA: 作成時だけ使う入力用フィールド。出力には出さない
-    # VI: Field chỉ dùng lúc tạo. Không xuất hiện ở output
     node_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
-    # JA: 現在進行中(未完了)、無ければ最新のAttemptの情報
-    # VI: Attempt đang thực hiện (chưa hoàn thành), nếu không có thì lấy mới nhất
     current_attempt = serializers.SerializerMethodField()
 
     class Meta:
@@ -82,8 +78,4 @@ class SendMessageInputSerializer(serializers.Serializer):
     action_type = serializers.ChoiceField(
         choices=["ANSWER", "REQUEST_CHANGE_METHOD", "HINT", "COMPLETE"], default="ANSWER"
     )
-    # JA: action_type="COMPLETE"のときだけ意味を持つ。ユーザーが「理解できた」
-    #     と自己申告したかどうか(間隔復習機能のSM-2評価に使われる)。
-    # VI: Chỉ có ý nghĩa khi action_type="COMPLETE". Người dùng tự báo có
-    #     "đã hiểu" hay không (dùng để đánh giá SM-2 ở tính năng ôn tập).
     understood = serializers.BooleanField(required=False, default=False)

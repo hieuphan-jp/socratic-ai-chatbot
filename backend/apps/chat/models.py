@@ -23,12 +23,6 @@ class ChatSession(BaseModel):
     )
     title = models.CharField(max_length=255, default="New Chat Session")
 
-    # JA: KNOWLEDGE_NODEへの外部キー。OneToOneFieldなので、1つのノードに
-    #     対してチャットセッションは常に1つだけになる(「そのノードを作った
-    #     ときのチャットに戻る」という導線を成立させるため)。
-    # VI: Khóa ngoại tới KNOWLEDGE_NODE. Là OneToOneField nên 1 node luôn
-    #     ứng với đúng 1 chat session (để "quay lại chat lúc tạo node đó"
-    #     luôn thành lập).
     knowledge_node = models.OneToOneField(
         KnowledgeNode,
         on_delete=models.SET_NULL,
@@ -42,14 +36,9 @@ class ChatSession(BaseModel):
 
 
 class Attempt(BaseModel):
-    # JA: 1回分の学習・復習の記録。同じChatSessionを何度も復習に使い回す
-    #     ため、hint_count・completed_atをChatSessionに直接持たせると
-    #     2回目の記録が1回目を上書きしてしまう。この区別を担うために新設。
-    # VI: Bản ghi cho 1 lần học/ôn tập. Vì dùng lại 1 ChatSession nhiều lần
-    #     để ôn tập, nếu để hint_count/completed_at trực tiếp trên
-    #     ChatSession thì lần ghi thứ 2 sẽ ghi đè lần 1. Thêm mới Attempt
-    #     để đảm nhiệm việc phân biệt đó.
-    chat_session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="attempts")
+    chat_session = models.ForeignKey(
+        ChatSession, on_delete=models.CASCADE, related_name="attempts"
+    )
     hint_count = models.PositiveIntegerField(default=0, help_text="ヒントを求めた回数")
     completed_at = models.DateTimeField(null=True, blank=True, help_text="完了した日時")
 
@@ -74,7 +63,9 @@ class ChatMessage(BaseModel):
         HIGH = "high", "High"
         LOW = "low", "Low"
 
-    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
+    session = models.ForeignKey(
+        ChatSession, on_delete=models.CASCADE, related_name="messages"
+    )
     parent_message = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -83,13 +74,6 @@ class ChatMessage(BaseModel):
         related_name="children",
     )
 
-    # JA: 分岐推定用フィールド(復習とは独立した機能)。AIが推定した親ノード
-    #     をparent_messageとは別に保持する。ユーザーが確認/変更するまで
-    #     parent_messageはこの推定値を「仮」の値として採用した状態になる。
-    # VI: Các field phục vụ đoán nhánh (tính năng khác, không liên quan ôn
-    #     tập). Node cha do AI đề xuất, lưu tách riêng khỏi parent_message
-    #     chính thức. Cho tới khi user xác nhận/đổi lại, parent_message sẽ
-    #     tạm dùng giá trị AI đề xuất này.
     suggested_parent = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -117,7 +101,9 @@ class ChatMessage(BaseModel):
     sender = models.CharField(max_length=10, choices=Sender.choices)
     message_text = models.TextField()
     is_hint = models.BooleanField(default=False)
-    node_type = models.CharField(max_length=20, choices=NodeType.choices, default=NodeType.STEP)
+    node_type = models.CharField(
+        max_length=20, choices=NodeType.choices, default=NodeType.STEP
+    )
 
     def __str__(self) -> str:
         return f"[{self.sender}] {self.message_text[:30]}"

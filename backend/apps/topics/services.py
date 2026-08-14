@@ -5,8 +5,7 @@ JA: 学習木構造の業務ロジック(HTTP非依存)。KnowledgeNodeの構造
     (topic/title/content)への書き込みは、このモジュール経由に一本化する。
     【設計変更 2026-08-13】復習機能がAIによる類似問題生成をやめたため、
     create_derived_node は廃止した。全てのKnowledgeNodeが常設ノードに
-    なったため、build_learning_tree・get_topic_children・
-    search_knowledge_nodes にあった origin_node による絞り込みも
+    なったため、build_learning_tree の origin_node による絞り込みも
     不要になった。
 VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Việc ghi vào
     cấu trúc KnowledgeNode (topic/title/content) gom về một mối qua
@@ -14,8 +13,7 @@ VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Vi�
     【Thay đổi thiết kế 2026-08-13】Vì tính năng ôn tập không còn AI sinh
     bài tương tự nữa, đã bỏ create_derived_node. Vì mọi KnowledgeNode giờ
     đều là node cố định, việc lọc theo origin_node trong
-    build_learning_tree/get_topic_children/search_knowledge_nodes cũng
-    không cần nữa.
+    build_learning_tree cũng không cần nữa.
 """
 
 from django.db.models import Q
@@ -71,7 +69,9 @@ def build_learning_tree(*, user) -> list[dict]:
         không còn cần nữa.
     """
     topics = list(Topic.objects.filter(user=user).order_by("position", "created_at"))
-    nodes = list(KnowledgeNode.objects.filter(topic__user=user).order_by("created_at"))
+    nodes = list(
+        KnowledgeNode.objects.filter(topic__user=user).order_by("created_at")
+    )
 
     nodes_by_topic: dict[str, list[KnowledgeNode]] = {}
     for node in nodes:
