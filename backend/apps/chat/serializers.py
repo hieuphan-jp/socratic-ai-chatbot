@@ -1,21 +1,22 @@
-# JA: JSONシリアライズと入力検証（KNOWLEDGE_NODE・ReviewLog 連携 + 分岐推定確認 対応）
-# VI: Tuần tự hóa JSON và kiểm tra đầu vào (Tích hợp KNOWLEDGE_NODE, ReviewLog + xác nhận đoán nhánh)
-
+# JA: JSONシリアライズと入力検証
+#     【設計変更2026-08-13】hint_count/completed_atはChatSessionから
+#     Attemptへ移動したため、ChatSessionSerializerは現在進行中(または
+#     最新)のAttempt情報をcurrent_attemptとして返す。作成時はnode_idを
+#     受け取れるようにした(create_chat_session_for_node経由)。
+# VI: Tuần tự hóa JSON và kiểm tra đầu vào.
+#     【Thay đổi thiết kế 2026-08-13】hint_count/completed_at đã chuyển từ
+#     ChatSession sang Attempt, nên ChatSessionSerializer trả về thông
+#     tin Attempt hiện tại (hoặc mới nhất) dưới dạng current_attempt. Lúc
+#     tạo có thể nhận node_id (qua create_chat_session_for_node).
 from rest_framework import serializers
-from .models import ChatMessage, ChatSession
+
+from .models import Attempt, ChatMessage, ChatSession
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
     parent_message_id = serializers.UUIDField(
         source="parent_message.id", allow_null=True, required=False
     )
-    # JA: ★フロントの確認UI用フィールド（分岐推定機能・復元）
-    # VI: ★Các field phục vụ UI xác nhận (tính năng đoán nhánh - khôi phục lại)
-    suggested_parent_id = serializers.UUIDField(
-        source="suggested_parent.id", allow_null=True, required=False, read_only=True
-    )
-    parent_confidence = serializers.CharField(read_only=True)
-    parent_confirmed = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = ChatMessage
@@ -23,9 +24,6 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "id",
             "session",
             "parent_message_id",
-            "suggested_parent_id",
-            "parent_confidence",
-            "parent_confirmed",
             "sender",
             "message_text",
             "is_hint",
@@ -35,12 +33,20 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "session", "created_at"]
 
 
+class AttemptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Attempt
+        fields = ["id", "hint_count", "completed_at", "created_at"]
+        read_only_fields = fields
+
+
 class ChatSessionSerializer(serializers.ModelSerializer):
     messages = ChatMessageSerializer(many=True, read_only=True)
-
-    # JA: リクエスト時に Cây kiến thức の node_id を受け取るためのフィールド
-    # VI: Trường nhận node_id từ Cây kiến thức khi Frontend tạo Session
-    node_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    knowledge_node = serializers.UUIDField(
+        source="knowledge_node_id", read_only=True, allow_null=True
+    )
+    node_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    current_attempt = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatSession
@@ -50,41 +56,26 @@ class ChatSessionSerializer(serializers.ModelSerializer):
             "title",
             "knowledge_node",
             "node_id",
-            "hint_count",
-            "completed_at",
+            "current_attempt",
             "messages",
             "created_at",
         ]
-        read_only_fields = [
-            "id",
-            "user",
-            "knowledge_node",
-            "hint_count",
-            "completed_at",
-            "created_at",
-        ]
+        read_only_fields = ["id", "user", "knowledge_node", "current_attempt", "created_at"]
+
+    def get_current_attempt(self, obj):
+        attempt = (
+            obj.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
+            or obj.attempts.order_by("-created_at").first()
+        )
+        return AttemptSerializer(attempt).data if attempt else None
 
 
 class SendMessageInputSerializer(serializers.Serializer):
-    """
-    JA: メッセージ送信リクエストの検証 (HINT / COMPLETE アクションに対応)
-        ★parent_message_id は「ユーザーが明示的にこのノードに返信する」場合のみ指定する。
-          指定しない（null/未送信）場合、バックエンドが AI に分岐先を推定させる。
-    VI: Validation request gửi tin nhắn (Hỗ trợ các action HINT và COMPLETE)
-        ★parent_message_id CHỈ truyền khi user chủ động chọn "trả lời tiếp node này".
-          Nếu không truyền (null/bỏ trống), backend sẽ để AI tự đoán nhánh cha.
-    """
+    """JA: メッセージ送信リクエストの検証 / VI: Validation request gửi tin nhắn"""
 
     parent_message_id = serializers.UUIDField(required=False, allow_null=True)
-    message_text = serializers.CharField(required=False, allow_blank=True, default="")
+    message_text = serializers.CharField(required=True)
     action_type = serializers.ChoiceField(
-        choices=["ANSWER", "REQUEST_CHANGE_METHOD", "HINT", "COMPLETE"],
-        default="ANSWER",
+        choices=["ANSWER", "REQUEST_CHANGE_METHOD", "HINT", "COMPLETE"], default="ANSWER"
     )
-
-
-class ConfirmParentInputSerializer(serializers.Serializer):
-    """JA: 親ノード確認/変更リクエストの検証 / VI: Validation request xác nhận/đổi node cha"""
-
-    message_id = serializers.UUIDField(required=True)
-    parent_message_id = serializers.UUIDField(required=False, allow_null=True)
+    understood = serializers.BooleanField(required=False, default=False)

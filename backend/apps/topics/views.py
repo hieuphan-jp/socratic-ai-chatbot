@@ -2,8 +2,12 @@
 apps/topics/views.py
 
 JA: 認可・入力検証・services呼び出し・シリアライズのみ。業務ロジックは書かない。
+    【設計変更 2026-08-13】origin_nodeフィールドが削除されたため、
+    has_nodes の annotate から origin_node__isnull=True の絞り込みを外した。
 VI: Chỉ phân quyền, kiểm tra đầu vào, gọi services, tuần tự hóa. Không viết
     logic nghiệp vụ ở đây.
+    【Thay đổi thiết kế 2026-08-13】Vì field origin_node đã bị xóa, đã bỏ
+    điều kiện lọc origin_node__isnull=True khỏi annotate của has_nodes.
 """
 
 from django.db.models import Exists, OuterRef
@@ -32,22 +36,12 @@ class TopicViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Gene
     permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        # JA: ★所有者絞り込み（必須）。has_children算出用にannotateしておく。
-        # VI: ★Lọc theo chủ sở hữu (bắt buộc). Annotate sẵn để tính has_children.
         has_child_topics = Topic.objects.filter(parent=OuterRef("pk"))
-        has_nodes = KnowledgeNode.objects.filter(topic=OuterRef("pk"), origin_node__isnull=True)
+        has_nodes = KnowledgeNode.objects.filter(topic=OuterRef("pk"))
         queryset = Topic.objects.filter(user=self.request.user).annotate(
             has_child_topics=Exists(has_child_topics),
             has_nodes=Exists(has_nodes),
         )
-        # JA: 検索セッションの起点(ルートTopicのみ)を取得するためのオプション絞り込み。
-        #     list アクション限定。children/search/retrieveはself.get_object()経由で
-        #     このget_queryset()を共有するため、ここで絞ると「クエリに?parent=nullが
-        #     付いていた」だけで本来アクセスできる自分のTopicが404になってしまう。
-        # VI: Lọc tùy chọn để lấy điểm bắt đầu phiên tìm kiếm (chỉ Topic gốc). Chỉ áp
-        #     dụng cho action list. children/search/retrieve dùng chung get_queryset()
-        #     này qua self.get_object(), nếu lọc ở đây thì chỉ vì query có ?parent=null
-        #     mà Topic của chính mình (đáng lẽ truy cập được) sẽ bị trả về 404.
         if self.action == "list" and self.request.query_params.get("parent") == "null":
             queryset = queryset.filter(parent__isnull=True)
         return queryset
@@ -62,14 +56,8 @@ class TopicViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Gene
 
     @action(detail=True, methods=["get"])
     def children(self, request, pk=None):
-        """
-        JA: 指定Topic直下の子Topicと常設KnowledgeNodeを返す(ドリルダウンUI用)。
-        VI: Trả về Topic con và KnowledgeNode cố định trực thuộc (dùng cho UI duyệt sâu dần).
-        """
         topic = self.get_object()
         child_topics, nodes = services.get_topic_children(topic=topic)
-        # JA: has_children を反映するため、annotate済みのget_queryset()経由で取り直す。
-        # VI: Lấy lại qua get_queryset() đã annotate để có has_children.
         annotated_children = self.get_queryset().filter(id__in=[t.id for t in child_topics])
         return Response(
             {
@@ -80,10 +68,6 @@ class TopicViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Gene
 
     @action(detail=True, methods=["get"])
     def search(self, request, pk=None):
-        """
-        JA: 指定Topic配下(自身を含む)を再帰的に検索し、常設KnowledgeNodeを返す。
-        VI: Tìm đệ quy trong phạm vi Topic (bao gồm chính nó), trả về KnowledgeNode cố định.
-        """
         topic = self.get_object()
         results = services.search_knowledge_nodes(
             topic=topic, query=request.query_params.get("q", "")
@@ -129,13 +113,9 @@ class KnowledgeNodeViewSet(
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # JA: ★所有者絞り込み（必須）。KnowledgeNodeにuser列はないためtopic経由で辿る
-        # VI: ★Lọc theo chủ sở hữu (bắt buộc). KnowledgeNode không có cột user nên đi qua topic
         return KnowledgeNode.objects.filter(topic__user=self.request.user)
 
     def get_serializer_class(self):
-        # JA: 詳細取得のみtopic_name付きの表現に切り替える(検索結果から選んだ後の画面用)。
-        # VI: Chỉ đổi sang biểu diễn có topic_name khi lấy chi tiết (dùng cho màn hình sau khi chọn từ kết quả tìm kiếm).
         if self.action == "retrieve":
             return KnowledgeNodeDetailSerializer
         return super().get_serializer_class()
