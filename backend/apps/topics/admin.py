@@ -7,7 +7,7 @@ VI: Đăng ký vào Django Admin. Dùng để kiểm tra hoạt động và nh�
 
 from django.contrib import admin
 
-from .models import KnowledgeNode, Topic
+from .models import KnowledgeNode, SearchHistory, Topic
 
 
 @admin.register(Topic)
@@ -24,5 +24,10 @@ class KnowledgeNodeAdmin(admin.ModelAdmin):
     list_display = ["title", "topic", "created_at"]
     list_filter = ["topic"]
     search_fields = ["title", "content"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    ordering = ["-created_at"]
+
+
+@admin.register(SearchHistory)
+class SearchHistoryAdmin(admin.ModelAdmin):
+    list_display = ["query", "user", "topic", "created_at"]
+    list_filter = ["user"]
+    search_fields = ["query"]
