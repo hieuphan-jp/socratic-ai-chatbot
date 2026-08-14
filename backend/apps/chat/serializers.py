@@ -79,3 +79,8 @@ class SendMessageInputSerializer(serializers.Serializer):
         choices=["ANSWER", "REQUEST_CHANGE_METHOD", "HINT", "COMPLETE"], default="ANSWER"
     )
     understood = serializers.BooleanField(required=False, default=False)
+    # JA: ★knowledge_node未設定のセッションをCOMPLETEして知識ノードを新規
+    #     作成する場合のみ必須。保存先のTopicを指定する。
+    # VI: ★Chỉ bắt buộc khi COMPLETE một phiên chat tự do (chưa gắn
+    #     knowledge_node) để tạo knowledge node mới. Chỉ định Topic để lưu vào.
+    topic_id = serializers.UUIDField(required=False, allow_null=True)

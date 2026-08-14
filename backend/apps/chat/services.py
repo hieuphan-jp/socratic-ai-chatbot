@@ -17,7 +17,24 @@ You are an AI Tutor. Guide the user step by step through learning.
 NEVER give direct full answers. Provide hint-based guidance and review answers.
 """
 
+# JA: ★フリーチャット(knowledge_node未設定)が「完了」した際、会話内容から
+#     知識ノードのtitle/contentをAIに要約させるための指示。
+# VI: ★Chỉ thị để AI tóm tắt nội dung hội thoại thành title/content của
+#     knowledge node, khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn thành".
+NODE_SUMMARY_SYSTEM_PROMPT = """
+You are summarizing a tutoring conversation into a permanent study note for the student.
+
+Based on the conversation so far, write a concise study note capturing what the student learned.
+
+OUTPUT FORMAT (STRICT):
+- Line 1: a short title (a few words, no trailing punctuation)
+- From line 2 onward: a concise explanation of the concept, written for the student's own future review
+
+Do not include any preamble, meta-commentary, or markdown formatting.
+"""
+
 NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
+SESSION_NODE_TITLE_MAX_LEN = 255
 
 
 def create_chat_session_for_node(*, user, node_id=None, title: str = "New Session") -> ChatSession:
@@ -37,6 +54,70 @@ def create_chat_session_for_node(*, user, node_id=None, title: str = "New Sessio
             title = f"学習: {node.title}"
 
     return ChatSession.objects.create(user=user, knowledge_node=node, title=title)
+
+
+def _summarize_session_as_node(session: ChatSession) -> tuple[str, str]:
+    """
+    JA: セッションの会話履歴全体をAIに渡し、知識ノードのtitle/contentを要約
+        させる。1行目をtitle、2行目以降をcontentとして解釈する規約。
+    VI: Đưa toàn bộ lịch sử hội thoại của session cho AI, nhờ tóm tắt thành
+        title/content của knowledge node. Quy ước: dòng 1 là title, từ dòng
+        2 trở đi là content.
+    """
+    llm = get_llm()
+    history = [
+        AIChatMessage(
+            role="user" if msg.sender == ChatMessage.Sender.USER else "assistant",
+            content=msg.message_text[:600],
+        )
+        for msg in session.messages.order_by("created_at")
+    ]
+    messages_payload = [
+        AIChatMessage(role="system", content=NODE_SUMMARY_SYSTEM_PROMPT),
+        *history,
+        AIChatMessage(
+            role="user",
+            content="Summarize this conversation into a study note title and content now.",
+        ),
+    ]
+    raw_response = llm.chat(messages_payload)
+    if isinstance(raw_response, ChatResult):
+        text = raw_response.text
+    elif hasattr(raw_response, "text"):
+        text = raw_response.text
+    else:
+        text = str(raw_response)
+    text = text.strip()
+
+    lines = text.splitlines()
+    title = (lines[0].strip() if lines else "")[:SESSION_NODE_TITLE_MAX_LEN]
+    content = "\n".join(lines[1:]).strip() or text
+    return title or session.title, content
+
+
+def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
+    """
+    JA: フリーチャット(knowledge_node未設定)が「完了」した時に呼ばれる。
+        会話内容からAIにtitle/contentを要約させ、指定Topic配下に新しい
+        KnowledgeNodeとして保存し、このセッションと1:1(OneToOne)で紐付ける。
+        KnowledgeNodeの作成自体は所有アプリ(apps.topics)のservices経由で行う
+        (このアプリからKnowledgeNode.objects.createを直接呼ばない)。
+    VI: Được gọi khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn
+        thành". Nhờ AI tóm tắt hội thoại thành title/content, lưu thành một
+        KnowledgeNode mới dưới Topic được chỉ định, và gắn 1:1 (OneToOne)
+        với session này. Việc tạo KnowledgeNode được ủy thác qua services
+        của app sở hữu (apps.topics), không gọi thẳng
+        KnowledgeNode.objects.create từ app này.
+    """
+    from apps.topics import services as topics_services
+
+    topic = topics_services.get_owned_topic(user=user, topic_id=topic_id)
+    title, content = _summarize_session_as_node(session)
+    node = topics_services.create_knowledge_node(user=user, topic=topic, title=title, content=content)
+
+    session.knowledge_node = node
+    session.save(update_fields=["knowledge_node"])
+    return node
 
 
 def get_or_create_active_attempt(*, session: ChatSession) -> Attempt:
@@ -104,10 +185,27 @@ def send_message_and_get_ai_response(
     parent_message_id=None,
     action_type: str = "ANSWER",
     understood: bool | None = None,
+    topic_id=None,
 ) -> dict:
     text = (user_message_text or "").strip()
     if action_type in NEEDS_AI_ANSWER and not text:
         raise ValidationError("メッセージ内容は必須です / Nội dung tin nhắn là bắt buộc")
+
+    # JA: ★フリーチャット(knowledge_node未設定)がCOMPLETEした瞬間に、初めて
+    #     知識ノードを作成しこのセッションと1:1で紐付ける。既にノードがある
+    #     セッション(復習チャット)ではここは通らない。record_review_result は
+    #     knowledge_node必須のため、この処理を先に済ませておく必要がある。
+    # VI: ★Khi một phiên chat tự do (chưa gắn knowledge_node) COMPLETE lần
+    #     đầu, tạo mới knowledge node và gắn 1:1 với session này. Session đã
+    #     có sẵn node (chat ôn tập) sẽ không đi qua nhánh này. Vì
+    #     record_review_result bắt buộc phải có knowledge_node, bước này cần
+    #     làm trước.
+    if action_type == "COMPLETE" and session.knowledge_node_id is None:
+        if not topic_id:
+            raise ValidationError(
+                "知識ノードとして保存するTopicを選択してください / Vui lòng chọn Topic để lưu"
+            )
+        create_knowledge_node_from_session(session=session, user=session.user, topic_id=topic_id)
 
     if action_type in ("HINT", "COMPLETE"):
         record_hint_or_completion(session=session, action_type=action_type, understood=understood)

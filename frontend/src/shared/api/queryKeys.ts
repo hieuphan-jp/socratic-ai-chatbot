@@ -28,4 +28,9 @@ export const queryKeys = {
     all: ['learningTree'] as const,
     list: () => [...queryKeys.learningTree.all, 'list'] as const,
   },
+  // JA: Topic(学習木のカテゴリ)のクエリキー。 VI: Key cho Topic (danh mục của cây học tập).
+  topics: {
+    all: ['topics'] as const,
+    list: () => [...queryKeys.topics.all, 'list'] as const,
+  },
 }

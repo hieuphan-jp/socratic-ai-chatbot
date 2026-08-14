@@ -1,10 +1,11 @@
 import { api as client } from '@/shared/api/client'
-import type { 
-  ChatSession, 
-  ChatMessage, 
-  SendMessagePayload, 
-  ConfirmParentPayload, 
-  GraphData 
+import type {
+  ChatSession,
+  ChatMessage,
+  SendMessagePayload,
+  ConfirmParentPayload,
+  GraphData,
+  Topic,
 } from '@/shared/types'
 
 export const chatApi = {
@@ -25,11 +26,21 @@ export const chatApi = {
     const res = await client.post<{
       user_message: ChatMessage
       ai_message: ChatMessage
-      session_info?: {
-        hint_count: number
-        completed_at: string | null
-      }
+      knowledge_node: string | null
+      knowledge_node_title: string | null
     }>(`/chat-sessions/${sessionId}/send-message/`, payload)
+    return res
+  },
+
+  // 7. Topic一覧取得（知識ノードの保存先選択用）/ VI: Lấy danh sách Topic (để chọn nơi lưu knowledge node)
+  getTopics: async () => {
+    const res = await client.get<Topic[]>('/topics/')
+    return res
+  },
+
+  // 8. Topic新規作成 / VI: Tạo Topic mới
+  createTopic: async (name: string) => {
+    const res = await client.post<Topic>('/topics/', { name })
     return res
   },
 

@@ -17,7 +17,10 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { chatApi } from '../api/chatApi';
-import type { ChatMessage } from '@/shared/types';
+import { useChatSessions, useTopics, useCreateTopic } from '../api/useChat';
+import { queryKeys } from '@/shared/api/queryKeys';
+import { Button, Input, Notice, ErrorText } from '@/shared/ui';
+import type { ChatMessage, SendMessagePayload } from '@/shared/types';
 
 interface HintChatViewProps {
   activeSessionId?: string;
@@ -32,6 +35,22 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(propSessionId);
   const [inputText, setInputText] = useState('');
   const [showTree, setShowTree] = useState(true);
+
+  // JA: ★knowledge_node未設定のセッションをCOMPLETEする時に、保存先Topicを
+  //     選ぶための状態。既にnodeがあるセッションではこのUIは出さない。
+  // VI: ★State cho việc chọn Topic để lưu, khi COMPLETE một session chưa gắn
+  //     knowledge_node. Session đã có sẵn node thì không hiện UI này.
+  const [showSaveAsNode, setShowSaveAsNode] = useState(false);
+  const [selectedTopicId, setSelectedTopicId] = useState('');
+  const [newTopicName, setNewTopicName] = useState('');
+  const [savedNodeTitle, setSavedNodeTitle] = useState<string | null>(null);
+
+  const { data: sessions } = useChatSessions();
+  const currentSession = sessions?.find((s) => String(s.id) === String(currentSessionId));
+  const hasKnowledgeNode = Boolean(currentSession?.knowledge_node);
+
+  const { data: topics = [], isPending: isLoadingTopics } = useTopics();
+  const createTopicMutation = useCreateTopic();
 
   // JA: 親コンポーネントからのアクティブセッションID変更を監視 / VI: Đồng bộ session ID khi props thay đổi
   useEffect(() => {
@@ -225,14 +244,15 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     return { nodes: generatedNodes, edges: generatedEdges };
   }, [messages]);
 
-  // JA: メッセージ送信ミューテーション / VI: Mutation gửi tin nhắn
+  // JA: メッセージ送信ミューテーション（ANSWER/HINT/COMPLETE 共通）
+  // VI: Mutation gửi tin nhắn (dùng chung cho ANSWER/HINT/COMPLETE)
   const sendMessageMutation = useMutation({
     mutationFn: ({
       sessionId,
       payload,
     }: {
       sessionId: string;
-      payload: { message_text: string; action_type: 'ANSWER' | 'CHANGE_METHOD' };
+      payload: SendMessagePayload;
     }) => chatApi.sendMessage(sessionId, payload),
     onSuccess: (data: any) => {
       queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
@@ -242,8 +262,57 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         return newData;
       });
       queryClient.invalidateQueries({ queryKey: ['chatMessages', currentSessionId] });
+      // JA: ★COMPLETEで新しい知識ノードが作られた場合、セッション一覧を
+      //     再取得してhasKnowledgeNodeを更新し、完了メッセージを表示する。
+      // VI: ★Nếu COMPLETE vừa tạo knowledge node mới, tải lại danh sách
+      //     session để cập nhật hasKnowledgeNode và hiện thông báo hoàn tất.
+      if (data.knowledge_node_title) {
+        setSavedNodeTitle(data.knowledge_node_title);
+        setShowSaveAsNode(false);
+        setSelectedTopicId('');
+        setNewTopicName('');
+        queryClient.invalidateQueries({ queryKey: queryKeys.chat.all });
+      }
     },
   });
+
+  // JA: 「完了」ボタンのハンドラ。既にノードがあるセッションはそのままCOMPLETE、
+  //     ノード未設定ならTopic選択パネルを開く。
+  // VI: Hàm xử lý nút "Hoàn thành". Session đã có node thì COMPLETE luôn,
+  //     chưa có node thì mở panel chọn Topic.
+  const handleCompleteClick = () => {
+    if (!currentSessionId) return;
+    if (hasKnowledgeNode) {
+      sendMessageMutation.mutate({
+        sessionId: currentSessionId,
+        payload: { message_text: '[COMPLETE]', action_type: 'COMPLETE', understood: true },
+      });
+      return;
+    }
+    setSavedNodeTitle(null);
+    setShowSaveAsNode(true);
+  };
+
+  // JA: Topic選択パネルの確定ハンドラ。新規Topic名が入力されていれば先に作成する。
+  // VI: Hàm xử lý xác nhận panel chọn Topic. Nếu có nhập tên Topic mới thì tạo trước.
+  const handleConfirmSaveAsNode = async () => {
+    if (!currentSessionId) return;
+    let topicId = selectedTopicId;
+    if (!topicId && newTopicName.trim()) {
+      const created = await createTopicMutation.mutateAsync(newTopicName.trim());
+      topicId = created.id;
+    }
+    if (!topicId) return;
+    sendMessageMutation.mutate({
+      sessionId: currentSessionId,
+      payload: {
+        message_text: '[COMPLETE]',
+        action_type: 'COMPLETE',
+        understood: true,
+        topic_id: topicId,
+      },
+    });
+  };
 
   // JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
   const handleSendMessage = async (text: string) => {
@@ -304,6 +373,98 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           🌿 思考ツリーを隠す / {showTree ? 'Ẩn cây tư duy' : 'Hiện cây tư duy'}
         </button>
       </div>
+
+      {/* JA: ★学んだ内容を知識ノードとして保存する導線 / VI: ★Luồng lưu nội dung đã học thành knowledge node */}
+      {currentSessionId && (
+        <div style={{ marginBottom: '12px' }}>
+          {!showSaveAsNode && (
+            <Button
+              type="button"
+              onClick={handleCompleteClick}
+              disabled={sendMessageMutation.isPending}
+            >
+              {hasKnowledgeNode
+                ? '復習を完了する / Hoàn thành ôn tập'
+                : '学習を完了して知識ノードとして保存 / Hoàn thành và lưu thành knowledge node'}
+            </Button>
+          )}
+
+          {showSaveAsNode && (
+            <div
+              style={{
+                marginTop: '8px',
+                padding: '12px 14px',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+                display: 'grid',
+                gap: '8px',
+              }}
+            >
+              <Notice>
+                保存先のTopicを選ぶか、新しいTopic名を入力してください /
+                Chọn Topic để lưu, hoặc nhập tên Topic mới
+              </Notice>
+
+              {isLoadingTopics ? (
+                <Notice>読み込み中… / Đang tải…</Notice>
+              ) : topics.length > 0 ? (
+                <select
+                  value={selectedTopicId}
+                  onChange={(e) => {
+                    setSelectedTopicId(e.target.value);
+                    if (e.target.value) setNewTopicName('');
+                  }}
+                  style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #ccc' }}
+                >
+                  <option value="">既存のTopicから選択 / Chọn Topic có sẵn</option>
+                  {topics.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+
+              <Input
+                placeholder="新しいTopic名 / Tên Topic mới"
+                value={newTopicName}
+                onChange={(e) => {
+                  setNewTopicName(e.target.value);
+                  if (e.target.value) setSelectedTopicId('');
+                }}
+              />
+
+              {sendMessageMutation.isError && (
+                <ErrorText>{(sendMessageMutation.error as Error).message}</ErrorText>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <Button
+                  type="button"
+                  onClick={handleConfirmSaveAsNode}
+                  disabled={
+                    (!selectedTopicId && !newTopicName.trim()) ||
+                    sendMessageMutation.isPending ||
+                    createTopicMutation.isPending
+                  }
+                >
+                  保存する / Lưu
+                </Button>
+                <Button type="button" onClick={() => setShowSaveAsNode(false)}>
+                  キャンセル / Hủy
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {savedNodeTitle && (
+            <Notice>
+              知識ノード「{savedNodeTitle}」として保存しました / Đã lưu thành knowledge node "
+              {savedNodeTitle}"
+            </Notice>
+          )}
+        </div>
+      )}
 
       {/* JA: チャット領域と思考ツリー領域のコンテナ / VI: Container chứa Cột Chat & Cột Sơ đồ tư duy */}
       <div style={{ display: 'flex', gap: '16px', width: '100%', marginBottom: '16px' }}>

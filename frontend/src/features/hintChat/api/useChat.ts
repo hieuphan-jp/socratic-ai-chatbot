@@ -3,6 +3,25 @@ import { chatApi } from './chatApi'
 import { queryKeys } from '@/shared/api/queryKeys'
 import type { SendMessagePayload } from '@/shared/types'
 
+// Hook lấy danh sách Topic (để chọn nơi lưu knowledge node khi hoàn thành chat tự do)
+export const useTopics = () => {
+  return useQuery({
+    queryKey: queryKeys.topics.list(),
+    queryFn: chatApi.getTopics,
+  })
+}
+
+// Hook tạo Topic mới
+export const useCreateTopic = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => chatApi.createTopic(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.topics.list() })
+    },
+  })
+}
+
 // Hook lấy danh sách phiên chat
 export const useChatSessions = () => {
   return useQuery({

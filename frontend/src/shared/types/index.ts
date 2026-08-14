@@ -34,17 +34,44 @@ export type ChatMessage = {
   created_at: string
 }
 
+// JA: 1回分の学習・復習の記録。AttemptSerializer と対応。
+// VI: Bản ghi một lượt học/ôn tập. Tương ứng AttemptSerializer backend.
+export type Attempt = {
+  id: string
+  hint_count: number
+  completed_at: string | null
+  created_at: string
+}
+
 // JA: チャットセッション。ChatSessionSerializer と対応。
+//     【設計変更2026-08-13】hint_count/completed_atはAttemptへ移動したため
+//     current_attemptとして返る。knowledge_nodeは1セッションにつき最大1件
+//     (OneToOne)。
 // VI: Phiên chat, tương ứng ChatSessionSerializer backend.
+//     【Thay đổi thiết kế 2026-08-13】hint_count/completed_at đã chuyển sang
+//     Attempt nên trả về dưới dạng current_attempt. knowledge_node tối đa 1
+//     cho mỗi session (OneToOne).
 export type ChatSession = {
   id: string
   user: number
   title: string
-  knowledge_node?: number | null
-  hint_count?: number
-  completed_at?: string | null
+  knowledge_node?: string | null
+  current_attempt?: Attempt | null
   messages?: ChatMessage[]
   created_at: string
+}
+
+// JA: 学習木のカテゴリ(棚)。TopicSerializer と対応。
+// VI: Danh mục (kệ) của cây học tập, tương ứng TopicSerializer backend.
+export type Topic = {
+  id: string
+  user: number
+  parent: string | null
+  name: string
+  description: string
+  position: number
+  created_at: string
+  has_children: boolean
 }
 
 export type StepNode = {
@@ -61,6 +88,12 @@ export type SendMessagePayload = {
   message_text: string
   parent_message_id?: string | null
   action_type: 'ANSWER' | 'CHANGE_METHOD' | 'HINT' | 'COMPLETE'
+  // JA: COMPLETE時、理解できたかどうかの自己申告(SM-2評価に使われる)。
+  // VI: Khi COMPLETE, tự báo cáo có hiểu hay không (dùng để đánh giá SM-2).
+  understood?: boolean
+  // JA: knowledge_node未設定のセッションをCOMPLETEする時だけ必須(保存先Topic)。
+  // VI: Chỉ bắt buộc khi COMPLETE session chưa gắn knowledge_node (Topic để lưu).
+  topic_id?: string
 }
 
 // JA: 親ノード確認用ペイロード。ConfirmParentInputSerializer と対応。
