@@ -20,11 +20,13 @@ from rest_framework.views import APIView
 from apps.common.permissions import IsOwner
 
 from . import services
-from .models import KnowledgeNode, Topic
+from .models import KnowledgeNode, SearchHistory, Topic
 from .serializers import (
+    AISearchInputSerializer,
     KnowledgeNodeDetailSerializer,
     KnowledgeNodeSerializer,
     KnowledgeNodeSummarySerializer,
+    SearchHistorySerializer,
     TopicSerializer,
 )
 
@@ -71,6 +73,34 @@ class TopicViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Gene
             topic=topic, query=request.query_params.get("q", "")
         )
         return Response(KnowledgeNodeSummarySerializer(results, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="ai-search")
+    def ai_search(self, request):
+        """
+        JA: 単語がわからないユーザー向け。曖昧な説明文をAIに渡し、学習カテゴリ名の
+            候補を提案するだけ(実際の検索は行わない)。
+        VI: Dành cho user không nhớ từ chính xác. Đưa mô tả mơ hồ cho AI để gợi ý tên
+            danh mục học tập (không tự thực hiện tìm kiếm).
+        """
+        serializer = AISearchInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        suggestions = services.suggest_topic_keyword(
+            description=serializer.validated_data["description"]
+        )
+        return Response({"suggestions": suggestions})
+
+
+class SearchHistoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """JA: 検索履歴の一覧のみ(新しい順)。VI: Chỉ liệt kê lịch sử tìm kiếm (mới nhất trước)."""
+
+    serializer_class = SearchHistorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # JA: ★所有者絞り込み（必須）/ VI: ★Lọc theo chủ sở hữu (bắt buộc)
+        return SearchHistory.objects.filter(user=self.request.user).select_related("topic")[
+            : services.SEARCH_HISTORY_LIMIT
+        ]
 
 
 class KnowledgeNodeViewSet(
