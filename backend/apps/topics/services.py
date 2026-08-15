@@ -73,6 +73,23 @@ def get_owned_topic(*, user, topic_id) -> Topic:
     return topic
 
 
+def get_owned_knowledge_node(*, user, node_id) -> KnowledgeNode:
+    """
+    JA: 他アプリ(例: apps/chat)がKnowledgeNodeを所有権チェック込みで取得するための窓口。
+        KnowledgeNodeはuserを直接持たず、topic.user が所有者なので、各アプリが
+        自前で `KnowledgeNode.objects.filter(id=...)` すると所有権チェックが漏れやすい。
+        get_owned_topic と同じく、この関数経由に一本化する。
+    VI: Cửa ngõ để app khác (vd: apps/chat) lấy KnowledgeNode kèm kiểm tra chủ sở hữu.
+        KnowledgeNode không giữ user trực tiếp, chủ sở hữu là topic.user, nên nếu mỗi app
+        tự viết `KnowledgeNode.objects.filter(id=...)` thì rất dễ quên kiểm tra quyền.
+        Giống get_owned_topic, phải gom về một mối qua hàm này.
+    """
+    node = KnowledgeNode.objects.filter(id=node_id, topic__user=user).first()
+    if node is None:
+        raise NotFound("KnowledgeNode が見つかりません / Không tìm thấy KnowledgeNode")
+    return node
+
+
 def create_knowledge_node(*, user, topic: Topic, title: str, content: str) -> KnowledgeNode:
     if topic.user_id != user.id:
         raise PermissionDenied(

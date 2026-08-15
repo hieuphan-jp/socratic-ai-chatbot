@@ -61,32 +61,54 @@ class ReviewSchedule(BaseModel):
     def __str__(self):
         return f"ReviewSchedule(node={self.node_id})"
 
-    # --- 記憶定着の濃さ(色)は保存せず、都度この2フィールドから計算する ---
-    RETENTION_COLORS = {
-        "unlearned": "#9E9E9E",
-        "fresh": "#2E7D46",
-        "fading": "#7FB894",
-        "overdue": "#C9622A",
-    }
+    # --- 定着度(緑の濃さ)と復習タイミング(別UI)は、別々の軸として返す ---
+    # JA: 【設計変更 2026-08-15】以前は「経過日数 / interval_days」の比率ひとつで
+    #     4段階の色(retention_level/retention_color)を決めていたが、それだと
+    #     「復習を重ねて定着した」ことと「そろそろ復習の番が来た」ことが同じ色に
+    #     混ざってしまい、ユーザーが木を見て何をすべきか分からなかった。そこで
+    #     2軸に分ける:
+    #       ・mastery_level … 復習を完了した累計回数。葉の緑の濃さに使う(増える一方)
+    #       ・is_due        … 復習予定日を過ぎたか。緑とは別のUI(バッジ等)に使う
+    #     色そのもの(16進コード)は表示の関心事なのでフロントで決める。ここでは
+    #     段階の数(MASTERY_MAX_LEVEL)という業務上の閾値だけを持つ。
+    # VI: 【Thay đổi thiết kế 2026-08-15】Trước đây chỉ dùng một tỉ lệ "số ngày đã
+    #     trôi qua / interval_days" để quyết định 4 mức màu (retention_level/
+    #     retention_color). Cách đó trộn lẫn "đã ôn nhiều lần nên nhớ chắc" với
+    #     "sắp tới lượt ôn", khiến user nhìn cây không biết phải làm gì. Nay tách
+    #     thành 2 trục:
+    #       ・mastery_level … tổng số lần đã ôn xong; dùng cho độ đậm của màu xanh
+    #       ・is_due        … đã quá hạn ôn chưa; dùng cho UI khác (badge...)
+    #     Mã màu là việc của phía hiển thị nên frontend tự quyết. Ở đây chỉ giữ
+    #     ngưỡng nghiệp vụ là số bậc (MASTERY_MAX_LEVEL).
+
+    # JA: 何回復習したら「最も濃い緑(定着済み)」とみなすか。VI: Ôn bao nhiêu lần thì coi là "xanh đậm nhất".
+    MASTERY_MAX_LEVEL = 5
 
     @property
-    def retention_level(self) -> str:
-        """経過日数と interval_days の比率から定着度合いを4段階で返す。"""
-        if self.last_learned_at is None:
-            return "unlearned"
-
-        elapsed_days = (timezone.now() - self.last_learned_at).days
-        decay_ratio = elapsed_days / max(self.interval_days, 1)
-
-        if decay_ratio <= 0.5:
-            return "fresh"
-        elif decay_ratio <= 1.0:
-            return "fading"
-        return "overdue"
+    def mastery_level(self) -> int:
+        """
+        JA: 葉の緑の濃さ。0(未学習)〜MASTERY_MAX_LEVEL。学習/復習を完了するたびに
+            1段階濃くなり、下がることはない。
+        VI: Độ đậm màu xanh của lá. 0 (chưa học) đến MASTERY_MAX_LEVEL. Mỗi lần
+            học/ôn xong đậm thêm 1 bậc và không bao giờ giảm.
+        """
+        return min(self.learned_count, self.MASTERY_MAX_LEVEL)
 
     @property
-    def retention_color(self) -> str:
-        return self.RETENTION_COLORS[self.retention_level]
+    def is_due(self) -> bool:
+        """JA: 復習予定日を過ぎたか / VI: Đã tới (quá) hạn ôn tập chưa"""
+        return self.next_review_at <= timezone.now()
+
+    @property
+    def days_overdue(self) -> int:
+        """
+        JA: 予定日から何日過ぎたか(まだ来ていなければ0)。「そろそろ」と「かなり
+            放置している」をUIで出し分けたい場合に使う。
+        VI: Đã quá hạn bao nhiêu ngày (chưa tới hạn thì 0). Dùng khi muốn phân biệt
+            "sắp tới hạn" và "bỏ quên đã lâu" trên UI.
+        """
+        delta = timezone.now() - self.next_review_at
+        return max(delta.days, 0)
 
 
 class ReviewLog(BaseModel):
