@@ -23,7 +23,7 @@ import { useChatSessions } from '../api/useChat';
 import { TopicFolderPicker } from './TopicFolderPicker';
 import { queryKeys } from '@/shared/api/queryKeys';
 import { Button, Notice, ErrorText } from '@/shared/ui';
-import type { ChatMessage, SendMessagePayload } from '@/shared/types';
+import type { ChatMessage, GraphData, SendMessagePayload } from '@/shared/types';
 
 interface HintChatViewProps {
   activeSessionId?: string;
@@ -98,15 +98,14 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       parentMessageId: string | null;
     }) => chatApi.confirmParent(sessionId, { message_id: messageId, parent_message_id: parentMessageId }),
     onSuccess: (_updatedMsg: any, variables) => {
-      // JA: キャッシュの parent_message と parent_confirmed を直接更新
-      // VI: Cập nhật trực tiếp cache local để cố định cấu trúc rẽ nhánh vĩnh viễn
+      // JA: キャッシュの親と確認フラグを直接更新し、確認バナーを即座に消す。
+      // VI: Cập nhật trực tiếp node cha và cờ xác nhận trong cache để banner biến mất ngay.
       queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
         if (!oldData) return [];
         return oldData.map((m) => {
           if (String(m.id).toLowerCase() === String(variables.messageId).toLowerCase()) {
             return {
               ...m,
-              parent_message: variables.parentMessageId as any,
               parent_message_id: variables.parentMessageId,
               parent_confirmed: true,
             };
@@ -114,137 +113,80 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           return m;
         });
       });
+      // JA: 親が変わると木の形と採番も変わるので、サーバーから取り直す。
+      // VI: Đổi node cha thì hình dạng cây và cách đánh số cũng đổi, nên lấy lại từ server.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.chat.tree(currentSessionId ?? ''),
+      });
     },
   });
 
-  // JA: 3. メッセージ変更時に React Flow の Node と Edge を自動計算してセット
-  // VI: Tự động tính toán vị trí Node và dây nối Edge khi có danh sách tin nhắn mới
+  // JA: 3. 思考ツリーの描画データはサーバーから取得する。
+  //     ★以前はここでフロントが「USER発言の時系列の通し番号」を振っていたため、
+  //     枝に分かれても番号が連番のままで、番号とノードの位置が食い違っていた。
+  //     採番はサーバーが木を辿って行うので、step_label をそのまま表示する。
+  // VI: 3. Lấy dữ liệu vẽ cây tư duy từ server.
+  //     ★Trước đây frontend tự đánh số tuần tự theo thời gian của phát ngôn USER nên khi
+  //     rẽ nhánh, số vẫn chạy liên tiếp và lệch với vị trí node. Việc đánh số do server
+  //     duyệt cây đảm nhiệm, nên chỉ cần hiển thị đúng step_label.
+  const { data: graph } = useQuery<GraphData>({
+    queryKey: queryKeys.chat.tree(currentSessionId ?? ''),
+    queryFn: () => chatApi.getGraph(currentSessionId as string),
+    enabled: !!currentSessionId,
+  });
+
   useEffect(() => {
-    const generatedNodes: Node[] = [];
-    const generatedEdges: Edge[] = [];
+    if (!graph) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
 
-    const userMsgs = messages.filter((msg: ChatMessage) => {
-      const sender = (msg.sender || msg.node_type || (msg as any).sender_type || '').toUpperCase();
-      return sender === 'USER' || sender === 'HUMAN';
-    });
+    // JA: 枝は右へ、幹は左の列に置く。深い枝ほど右にずらして階層が見えるようにする。
+    // VI: Nhánh đặt sang phải, thân ở cột trái. Nhánh càng sâu càng lệch phải để thấy phân cấp.
+    const depthOf = (label: string) => label.split('-').length - 1;
 
-    if (userMsgs.length === 0) {
-      generatedNodes.push(
-        {
-          id: 'step-1',
-          data: { label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán' },
-          position: { x: 50, y: 20 },
-          style: {
-            border: '1px solid #d1d5db',
-            borderRadius: '6px',
-            padding: '8px',
-            fontSize: '11px',
-            textAlign: 'center',
-            background: '#ffffff',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-            width: 160,
-          },
-        },
-        {
-          id: 'step-2',
-          data: { label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp giải' },
-          position: { x: 50, y: 120 },
-          style: {
-            border: '1px solid #d1d5db',
-            borderRadius: '6px',
-            padding: '8px',
-            fontSize: '11px',
-            textAlign: 'center',
-            background: '#ffffff',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-            width: 160,
-          },
-        }
-      );
-
-      generatedEdges.push({
-        id: 'e1-2',
-        source: 'step-1',
-        target: 'step-2',
-        animated: true,
-        style: { stroke: '#3b82f6', strokeDasharray: '4', strokeWidth: 1.5 },
-      });
-    } else {
-      const nodeIndexMap: Record<string, number> = {};
-      userMsgs.forEach((msg, idx) => {
-        if (msg.id) nodeIndexMap[String(msg.id).toLowerCase()] = idx;
-      });
-
-      userMsgs.forEach((msg: ChatMessage, idx: number) => {
-        const text = msg.message_text || '';
-        const stepNum = idx + 1;
-        const nodeId = String(msg.id || `node-${stepNum}`).toLowerCase();
-
-        // JA: parent_message または parent_message_id から ID を抽出 (文字列・オブジェクト両対応)
-        // VI: Bóc tách parentId chuẩn hỗ trợ cả trường hợp kiểu Object hoặc UUID String
-        const rawParent = (msg as any).parent_message_id || msg.parent_message;
-        let parentId: string | null = null;
-        if (typeof rawParent === 'object' && rawParent !== null) {
-          parentId = String((rawParent as any).id).toLowerCase();
-        } else if (rawParent) {
-          parentId = String(rawParent).toLowerCase();
-        }
-
-        // JA: 直前のノード以外を親としている場合は分岐とみなす
-        // VI: Kiểm tra xem node có rẽ nhánh từ node cũ hơn câu liền trước hay không
-        const isBranching = Boolean(
-          parentId && 
-          nodeIndexMap[parentId] !== undefined && 
-          nodeIndexMap[parentId] < idx - 1
-        );
-
-        const posX = isBranching ? 220 : 30;
-        const posY = 20 + idx * 100;
-
-        generatedNodes.push({
-          id: nodeId,
+    setNodes(
+      graph.nodes.map((node, index) => {
+        const depth = depthOf(node.data.step_label);
+        const isBranch = node.data.step_kind === 'BRANCH';
+        return {
+          id: node.id,
           data: {
-            label: `ステップ${stepNum}: ${text.length > 18 ? text.substring(0, 18) + '...' : text} / Bước ${stepNum}`,
+            label: `ステップ${node.data.step_label}\n${node.data.title}`,
           },
-          position: { x: posX, y: posY },
+          position: { x: 30 + depth * 190, y: 20 + index * 100 },
           style: {
-            border: isBranching ? '2px solid #2563eb' : '1px solid #d1d5db',
+            border: isBranch ? '2px solid #2563eb' : '1px solid #d1d5db',
             borderRadius: '6px',
             padding: '8px',
             fontSize: '11px',
             textAlign: 'center',
-            background: isBranching ? '#eff6ff' : '#ffffff',
+            whiteSpace: 'pre-wrap',
+            background: isBranch ? '#eff6ff' : '#ffffff',
             boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
             width: 160,
             cursor: 'grab',
           },
-        });
+        } as Node;
+      })
+    );
 
-        if (idx > 0) {
-          const actualParentId = (parentId && nodeIndexMap[parentId] !== undefined)
-            ? parentId 
-            : String(userMsgs[idx - 1].id).toLowerCase();
+    setEdges(
+      graph.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        animated: !edge.is_branch,
+        style: {
+          stroke: edge.is_branch ? '#2563eb' : '#3b82f6',
+          strokeDasharray: edge.is_branch ? '0' : '4',
+          strokeWidth: edge.is_branch ? 2 : 1.5,
+        },
+      })) as Edge[]
+    );
+  }, [graph, setNodes, setEdges]);
 
-          if (actualParentId) {
-            generatedEdges.push({
-              id: `edge-${idx}`,
-              source: actualParentId,
-              target: nodeId,
-              animated: true,
-              style: { 
-                stroke: isBranching ? '#2563eb' : '#3b82f6', 
-                strokeDasharray: isBranching ? '0' : '4', 
-                strokeWidth: isBranching ? 2 : 1.5 
-              },
-            });
-          }
-        }
-      });
-    }
-
-    setNodes(generatedNodes);
-    setEdges(generatedEdges);
-  }, [messages, setNodes, setEdges]);
 
   // JA: メッセージ送信ミューテーション（ANSWER/HINT/COMPLETE 共通）
   // VI: Mutation gửi tin nhắn (dùng chung cho ANSWER/HINT/COMPLETE)
@@ -264,6 +206,13 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         return newData;
       });
       queryClient.invalidateQueries({ queryKey: ['chatMessages', currentSessionId] });
+      // JA: 新しいステップが増えた可能性があるので思考ツリーを取り直す。
+      //     幹/枝の判定と採番はサーバー側で行われるため、ここで再取得しないと反映されない。
+      // VI: Có thể vừa thêm bước mới nên lấy lại cây tư duy.
+      //     Việc phán đoán thân/nhánh và đánh số nằm ở server nên không lấy lại thì không cập nhật.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.chat.tree(currentSessionId ?? ''),
+      });
       // JA: ★COMPLETEで新しい知識ノードが作られた場合、セッション一覧を
       //     再取得してhasKnowledgeNodeを更新し、完了メッセージを表示する。
       // VI: ★Nếu COMPLETE vừa tạo knowledge node mới, tải lại danh sách
@@ -454,25 +403,23 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
               const isUser = (senderRole || '').toUpperCase() === 'USER';
               const textContent = msg.message_text || (msg as any).content || '';
 
-              const userMsgsBefore = messages
-                .slice(0, index)
-                .filter(m => ((m.sender || (m as any).sender_type || '').toUpperCase() === 'USER'));
-              
-              const immediatePrevUserMsg = userMsgsBefore.length > 0 ? userMsgsBefore[userMsgsBefore.length - 1] : null;
+              // JA: 確認UIを出すかどうかはバックエンドが parent_confirmed で決める。
+              //     直近ステップへの自然な派生なら確定済み(True)で返るのでバナーは出ず、
+              //     過去のステップへ繋ぎ直した場合だけ False で返って確認を促す。
+              //     ★以前はフロント側でも「直前のUSER発言か」を判定していたが、相槌は
+              //     ステップではないため基準がずれる。判定はサーバーに一本化する。
+              // VI: Việc hiện UI xác nhận do backend quyết định qua parent_confirmed.
+              //     Phái sinh tự nhiên từ bước gần nhất trả về True nên không hiện banner;
+              //     chỉ khi nối về bước cũ hơn mới trả False để hỏi lại.
+              //     ★Trước đây frontend cũng tự xét "có phải phát ngôn USER liền trước không",
+              //     nhưng câu đệm không phải là bước nên tiêu chí bị lệch. Gom về server.
+              const suggestedParentIdStr = String(msg.suggested_parent_id || '').toLowerCase();
 
-              const rawSuggestedParent = (msg as any).suggested_parent_id || msg.suggested_parent_id;
-              const suggestedParentIdStr = typeof rawSuggestedParent === 'object' && rawSuggestedParent !== null
-                ? String((rawSuggestedParent as any).id).toLowerCase()
-                : String(rawSuggestedParent || '').toLowerCase();
+              const needsBranchConfirm =
+                isUser && !msg.parent_confirmed && Boolean(suggestedParentIdStr);
 
-              const needsBranchConfirm = 
-                isUser && 
-                !msg.parent_confirmed && 
-                Boolean(suggestedParentIdStr) && 
-                suggestedParentIdStr !== (immediatePrevUserMsg ? String(immediatePrevUserMsg.id).toLowerCase() : '');
-
-              const suggestedParentMsg = needsBranchConfirm 
-                ? messages.find(m => String(m.id).toLowerCase() === suggestedParentIdStr) 
+              const suggestedParentMsg = needsBranchConfirm
+                ? messages.find(m => String(m.id).toLowerCase() === suggestedParentIdStr)
                 : null;
 
               return (
@@ -558,10 +505,9 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const rawMsgParent = (msg as any).parent_message_id || msg.parent_message;
-                            const currentParentId = typeof rawMsgParent === 'object' && rawMsgParent !== null
-                              ? String((rawMsgParent as any).id).toLowerCase()
-                              : String(rawMsgParent || '').toLowerCase();
+                            // JA: 「今のままにする」= 現在の親を維持したまま確認済みにする。
+                            // VI: "Giữ nguyên" = giữ node cha hiện tại và đánh dấu đã xác nhận.
+                            const currentParentId = msg.parent_message_id ?? null;
 
                             confirmParentMutation.mutate({
                               sessionId: currentSessionId,
