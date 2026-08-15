@@ -12,6 +12,7 @@ import json
 import logging
 import re
 
+from django.conf import settings
 from django.utils import timezone
 
 from apps.ai.base import ChatMessage as AIChatMessage
@@ -19,6 +20,7 @@ from apps.ai.base import ChatResult
 from apps.ai.client import get_llm
 from apps.common.exceptions import ValidationError
 
+from . import branching
 from .models import Attempt, ChatMessage, ChatSession
 
 logger = logging.getLogger(__name__)
@@ -184,32 +186,106 @@ def _build_branching_instructions(user_nodes: list, text: str) -> str:
 """
 
 
+def get_branching_strategy() -> str:
+    """
+    JA: 分岐推定の方式を返す。CHAT_BRANCHING_STRATEGY で切り替える。
+        - "ai"     … AIにJSONで判定させる(精度は高いがプロンプトが重い)
+        - "bigram" … 文字bigram類似度で判定する(AI呼び出しは通常の回答1回だけ、判定は無料)
+        - "off"    … 分岐推定をしない(常に直前の続き扱い)
+    VI: Trả về phương thức đoán nhánh, đổi bằng CHAT_BRANCHING_STRATEGY.
+        - "ai"     … để AI phán đoán bằng JSON (chính xác hơn nhưng prompt nặng)
+        - "bigram" … dùng similarity bigram ký tự (AI chỉ gọi 1 lần cho câu trả lời, phần đoán miễn phí)
+        - "off"    … không đoán nhánh (luôn coi là tiếp nối bước liền trước)
+    """
+    return str(getattr(settings, "CHAT_BRANCHING_STRATEGY", "ai")).strip().lower()
+
+
+def _plain_answer(*, llm, history, action_type: str, text: str) -> str:
+    """
+    JA: 分岐推定を伴わない、素の回答生成。プロンプトが軽いぶん安く速い。
+    VI: Sinh câu trả lời thuần, không kèm đoán nhánh. Prompt nhẹ nên rẻ và nhanh hơn.
+    """
+    messages_payload = [
+        AIChatMessage(role="system", content=SYSTEM_PROMPT),
+        *history,
+        AIChatMessage(role="user", content=f"Action: {action_type}\nMessage: {text}"),
+    ]
+    return _extract_text(llm.chat(messages_payload))
+
+
 def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: str, text: str):
     """
     JA: AIの回答本文と、分岐推定の結果(推定親ノード・確信度・確定フラグ)を返す。
         ユーザーが明示的に親を指定した場合、または質問がまだ1件以下の場合は
         推定不要なので通常の回答だけを生成する(初回から確認UIが出るのを防ぐ)。
+        分岐推定の方式は get_branching_strategy() で切り替わる。
     VI: Trả về nội dung trả lời của AI kèm kết quả đoán nhánh (node cha đoán được,
         độ tin cậy, cờ đã chốt). Nếu user đã tự chỉ định node cha, hoặc mới có <= 1 câu hỏi,
         thì không cần đoán (tránh hiện UI xác nhận ngay từ câu đầu).
+        Phương thức đoán nhánh đổi được qua get_branching_strategy().
     """
     llm = get_llm()
     history = _build_history_messages(session)
     user_nodes = list(
         session.messages.filter(sender=ChatMessage.Sender.USER).order_by("created_at")
     )
+    strategy = get_branching_strategy()
 
-    if explicit_parent is not None or len(user_nodes) <= 1:
-        messages_payload = [
-            AIChatMessage(role="system", content=SYSTEM_PROMPT),
-            *history,
-            AIChatMessage(role="user", content=f"Action: {action_type}\nMessage: {text}"),
-        ]
+    if explicit_parent is not None or len(user_nodes) <= 1 or strategy == "off":
         try:
-            return _extract_text(llm.chat(messages_payload)), None, "", True
+            return (
+                _plain_answer(llm=llm, history=history, action_type=action_type, text=text),
+                None,
+                "",
+                True,
+            )
         except Exception as e:
             logger.error("JA: AI応答生成エラー: %s / VI: Lỗi tạo phản hồi AI: %s", e, e)
             return f"[AI Tutor] Lỗi tạo phản hồi từ AI: {e}", None, "", True
+
+    if strategy == "bigram":
+        # JA: 回答生成はAIに任せるが、分岐推定はローカル計算で済ませる(APIコスト0・数ms)。
+        #     分岐推定用の重いプロンプトを積まないので、AI方式より1回あたりも安い。
+        # VI: Câu trả lời vẫn do AI sinh, nhưng phần đoán nhánh tính cục bộ (0 chi phí API, vài ms).
+        #     Không phải nhồi prompt đoán nhánh nặng nên mỗi lượt cũng rẻ hơn cách dùng AI.
+        try:
+            ai_text = _plain_answer(llm=llm, history=history, action_type=action_type, text=text)
+        except Exception as e:
+            logger.error("JA: AI応答生成エラー: %s / VI: Lỗi tạo phản hồi AI: %s", e, e)
+            return f"[AI Tutor] Lỗi tạo phản hồi từ AI: {e}", None, "", True
+
+        suggestion = branching.suggest_parent(
+            new_text=text,
+            candidates=[(str(node.id), node.message_text) for node in user_nodes],
+        )
+        if suggestion is None:
+            return ai_text, None, "", True
+
+        logger.info(
+            "[bigram] 分岐候補 score=%.4f margin=%.4f confidence=%s adopt=%s",
+            suggestion.score,
+            suggestion.margin,
+            suggestion.confidence,
+            branching.should_adopt(suggestion),
+        )
+
+        # JA: ★確信度が low の候補は採用しない(親を書き換えない)。
+        #     lowのまま採用すると parent_confirmed=True となり、確認UIも出ないまま
+        #     誤った親に繋がれてしまう。実測でも「連立方程式→二次方程式」のような
+        #     共通語だけの誤検知が low で出るため、安全側に倒す。
+        # VI: ★Không nhận ứng viên có confidence thấp (không đổi node cha).
+        #     Nếu nhận thì parent_confirmed=True, node cha bị nối sai mà không hiện UI xác nhận.
+        #     Đo thực tế cũng thấy các ca nhận nhầm chỉ do từ chung (vd "hệ phương trình"
+        #     → "phương trình bậc hai") đều rơi vào mức low, nên chọn hướng an toàn.
+        if not branching.should_adopt(suggestion):
+            return ai_text, None, "", True
+
+        suggested_parent = ChatMessage.objects.filter(
+            session=session, id=suggestion.parent_id
+        ).first()
+        # JA: 採用した場合は必ず未確定にして、ユーザーに確認させる。
+        # VI: Khi đã nhận thì luôn để chưa chốt, cho user xác nhận.
+        return ai_text, suggested_parent, suggestion.confidence, not suggested_parent
 
     messages_payload = [
         AIChatMessage(role="system", content=SYSTEM_PROMPT),

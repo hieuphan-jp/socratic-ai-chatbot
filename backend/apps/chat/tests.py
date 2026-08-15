@@ -14,7 +14,7 @@ VI: Kiểm tra tính năng đoán nhánh (xác nhận node cha) và luồng hoà
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.chat import services
+from apps.chat import branching, services
 from apps.chat.models import Attempt, ChatMessage, ChatSession
 from apps.common.exceptions import NotFound, ValidationError
 from apps.reviews.models import ReviewLog, ReviewSchedule
@@ -143,3 +143,85 @@ class CompletionFlowTestCase(TestCase):
             services.send_message_and_get_ai_response(
                 session=free_session, user_message_text="", action_type="COMPLETE", understood=True
             )
+
+
+class BigramBranchingTestCase(TestCase):
+    """
+    JA: 文字bigramによる分岐推定(AI不使用)の判定ロジック。
+        「拾えること」より「誤って拾わないこと」を重点的に守る。誤検知は思考ツリーの
+        形を黙って壊すが、検出漏れは単に直前の続きになるだけで害が小さいため。
+    VI: Logic đoán nhánh bằng bigram ký tự (không dùng AI).
+        Ưu tiên "không nhận nhầm" hơn là "bắt được hết". Nhận nhầm sẽ âm thầm làm hỏng
+        hình dạng cây tư duy, còn bỏ sót chỉ khiến nó nối tiếp bước liền trước, ít hại hơn.
+    """
+
+    def test_detects_return_to_older_topic(self):
+        suggestion = branching.suggest_parent(
+            new_text="さっきの三平方の定理の証明も教えてください",
+            candidates=[
+                ("a", "三平方の定理について教えてください"),
+                ("b", "直角三角形の斜辺はどう求めますか"),
+                ("c", "円の面積の公式を知りたいです"),
+            ],
+        )
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion.parent_id, "a")
+        self.assertTrue(branching.should_adopt(suggestion))
+
+    def test_natural_continuation_is_not_a_branch(self):
+        suggestion = branching.suggest_parent(
+            new_text="判別式が負のときはどうなりますか",
+            candidates=[
+                ("a", "二次方程式の解き方を教えてください"),
+                ("b", "判別式とは何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_polite_ending_alone_is_not_treated_as_similarity(self):
+        # JA: 話題が全く違っても「〜てください」が共通なだけで分岐にしてはいけない。
+        #     定型表現を除去する前は、この2文が score 0.15 に達して誤検知していた。
+        # VI: Dù khác hẳn chủ đề, chỉ vì cùng đuôi "〜てください" thì không được coi là rẽ nhánh.
+        #     Trước khi loại cụm cố định, 2 câu này đạt score 0.15 và bị nhận nhầm.
+        suggestion = branching.suggest_parent(
+            new_text="行列式の計算方法を教えてください",
+            candidates=[
+                ("a", "三平方の定理について教えてください"),
+                ("b", "円の面積の公式を知りたいです"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_shared_generic_word_stays_low_confidence(self):
+        # JA: 「方程式」だけが共通の場合は候補には挙がっても採用しない。
+        # VI: Nếu chỉ chung mỗi từ "phương trình" thì có thể thành ứng viên nhưng không được dùng.
+        suggestion = branching.suggest_parent(
+            new_text="連立方程式はどう解きますか",
+            candidates=[
+                ("a", "二次方程式の解き方を教えてください"),
+                ("b", "一次方程式との違いは何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_aizuchi_does_not_branch(self):
+        suggestion = branching.suggest_parent(
+            new_text="そうですね",
+            candidates=[
+                ("a", "微分の基本を教えてください"),
+                ("b", "積分との関係は何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_needs_at_least_two_candidates(self):
+        # JA: 直前1件しかないなら「出戻り先」が存在しない。
+        # VI: Chỉ có 1 ứng viên thì không tồn tại "bước cũ để quay lại".
+        self.assertIsNone(
+            branching.suggest_parent(new_text="続きを教えて", candidates=[("a", "微分の基本")])
+        )
+
+    def test_empty_text_is_safe(self):
+        self.assertIsNone(
+            branching.suggest_parent(new_text="", candidates=[("a", "微分"), ("b", "積分")])
+        )
