@@ -1,21 +1,41 @@
 """
 apps/topics/services.py
 
-JA: 学習木構造の業務ロジック（HTTP非依存）。KnowledgeNode の構造(topic/origin_node/
-    title/content)への書き込みは、このモジュール経由に一本化する。他アプリ
-    (例: apps/reviews)がAI生成の類題ノードを作りたい場合も create_derived_node
-    を呼ぶこと。KnowledgeNode.objects.create を他アプリから直接呼ばない
-    （所有権はこのアプリにあるため）。
-VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Việc ghi vào cấu trúc
-    KnowledgeNode (topic/origin_node/title/content) gom về một mối qua module này.
-    App khác (vd: apps/reviews) muốn tạo node類題 do AI sinh cũng phải gọi
-    create_derived_node. Không gọi thẳng KnowledgeNode.objects.create từ app khác
-    (vì quyền sở hữu thuộc app này).
+JA: 学習木構造の業務ロジック(HTTP非依存)。KnowledgeNodeの構造
+    (topic/title/content)への書き込みは、このモジュール経由に一本化する。
+    【設計変更 2026-08-13】復習機能がAIによる類似問題生成をやめたため、
+    create_derived_node は廃止した。全てのKnowledgeNodeが常設ノードに
+    なったため、build_learning_tree の origin_node による絞り込みも
+    不要になった。
+VI: Logic nghiệp vụ của cây học tập (không phụ thuộc HTTP). Việc ghi vào
+    cấu trúc KnowledgeNode (topic/title/content) gom về một mối qua
+    module này.
+    【Thay đổi thiết kế 2026-08-13】Vì tính năng ôn tập không còn AI sinh
+    bài tương tự nữa, đã bỏ create_derived_node. Vì mọi KnowledgeNode giờ
+    đều là node cố định, việc lọc theo origin_node trong
+    build_learning_tree cũng không cần nữa.
 """
 
-from apps.common.exceptions import PermissionDenied, ValidationError
+import re
 
-from .models import KnowledgeNode, Topic
+from django.db.models import Q
+
+from apps.ai.base import ChatMessage
+from apps.ai.client import get_llm
+from apps.common.exceptions import NotFound, PermissionDenied, ValidationError
+
+from .models import KnowledgeNode, SearchHistory, Topic
+
+# JA: AIに候補単語を出させるためのプロンプト。前置き無しでカンマ区切り1行だけを
+#     出力させることで、パース処理を単純に保つ。
+# VI: Prompt để AI đưa ra từ ứng viên. Yêu cầu chỉ xuất 1 dòng phân tách bằng dấu phẩy,
+#     không lời dẫn, để việc parse ở phía sau đơn giản.
+_AI_SEARCH_SYSTEM_PROMPT = (
+    "あなたは学習用語の名付けアシスタントです。ユーザーは調べたい分野や概念の"
+    "名前を思い出せず、曖昧な説明しかできません。説明から、学習カテゴリ名として"
+    "使われそうな短い単語(名詞)の候補を1〜5個、カンマ区切りで1行だけ出力してください。"
+    "説明や前置きは一切不要です。"
+)
 
 
 def _next_position(*, user, parent: Topic | None) -> int:
@@ -40,6 +60,36 @@ def create_topic(*, user, name: str, description: str = "", parent: Topic | None
     )
 
 
+def get_owned_topic(*, user, topic_id) -> Topic:
+    """
+    JA: 他アプリ(例: apps/chat)がTopicを所有権チェック込みで取得するための窓口。
+        Topicモデルへの直接クエリは他アプリにさせず、この関数経由に一本化する。
+    VI: Cửa ngõ để app khác (vd: apps/chat) lấy Topic kèm kiểm tra chủ sở hữu.
+        Không cho app khác query trực tiếp model Topic; phải qua hàm này.
+    """
+    topic = Topic.objects.filter(id=topic_id, user=user).first()
+    if topic is None:
+        raise NotFound("Topic が見つかりません / Không tìm thấy Topic")
+    return topic
+
+
+def get_owned_knowledge_node(*, user, node_id) -> KnowledgeNode:
+    """
+    JA: 他アプリ(例: apps/chat)がKnowledgeNodeを所有権チェック込みで取得するための窓口。
+        KnowledgeNodeはuserを直接持たず、topic.user が所有者なので、各アプリが
+        自前で `KnowledgeNode.objects.filter(id=...)` すると所有権チェックが漏れやすい。
+        get_owned_topic と同じく、この関数経由に一本化する。
+    VI: Cửa ngõ để app khác (vd: apps/chat) lấy KnowledgeNode kèm kiểm tra chủ sở hữu.
+        KnowledgeNode không giữ user trực tiếp, chủ sở hữu là topic.user, nên nếu mỗi app
+        tự viết `KnowledgeNode.objects.filter(id=...)` thì rất dễ quên kiểm tra quyền.
+        Giống get_owned_topic, phải gom về một mối qua hàm này.
+    """
+    node = KnowledgeNode.objects.filter(id=node_id, topic__user=user).first()
+    if node is None:
+        raise NotFound("KnowledgeNode が見つかりません / Không tìm thấy KnowledgeNode")
+    return node
+
+
 def create_knowledge_node(*, user, topic: Topic, title: str, content: str) -> KnowledgeNode:
     if topic.user_id != user.id:
         raise PermissionDenied(
@@ -51,37 +101,20 @@ def create_knowledge_node(*, user, topic: Topic, title: str, content: str) -> Kn
     return KnowledgeNode.objects.create(topic=topic, title=title, content=content or "")
 
 
-def create_derived_node(*, origin_node: KnowledgeNode, title: str, content: str) -> KnowledgeNode:
-    """
-    JA: AI生成の類題ノードを作成する。origin_node が常設ノードであることは
-        呼び出し側(reviews)が保証する。
-    VI: Tạo node類題 do AI sinh. Việc origin_node là node cố định do phía gọi
-        (reviews) đảm bảo.
-    """
-    return KnowledgeNode.objects.create(
-        topic=origin_node.topic,
-        origin_node=origin_node,
-        title=(title or "").strip() or f"{origin_node.title}(類題)",
-        content=content or "",
-    )
-
-
 def build_learning_tree(*, user) -> list[dict]:
     """
-    JA: user配下の Topic階層 + 各Topicに属する KnowledgeNode(常設ノードのみ、
-        origin_node が NULL のもの)を、フロントの TreeNode 形式にまとめて返す。
-        AI生成の使い捨て類題ノード(origin_node が非NULL)は木に含めない。
-    VI: Gom cây phân cấp Topic của user + KnowledgeNode (chỉ node cố định,
-        origin_node là NULL) thuộc mỗi Topic, trả về theo định dạng TreeNode
-        của frontend. Không đưa node類題 dùng một lần do AI sinh (origin_node
-        khác NULL) vào cây.
+    JA: user配下の Topic階層 + 各Topicに属する KnowledgeNode を、フロントの
+        TreeNode形式にまとめて返す。
+        【設計変更】origin_nodeが廃止され全ノードが常設ノードになったため、
+        以前あった origin_node__isnull=True による絞り込みは不要になった。
+    VI: Gom cây phân cấp Topic của user + KnowledgeNode thuộc mỗi Topic,
+        trả về theo định dạng TreeNode của frontend.
+        【Thay đổi thiết kế】Vì origin_node đã bị xóa và mọi node đều là
+        node cố định, việc lọc theo origin_node__isnull=True trước đây
+        không còn cần nữa.
     """
     topics = list(Topic.objects.filter(user=user).order_by("position", "created_at"))
-    nodes = list(
-        KnowledgeNode.objects.filter(topic__user=user, origin_node__isnull=True).order_by(
-            "created_at"
-        )
-    )
+    nodes = list(KnowledgeNode.objects.filter(topic__user=user).order_by("created_at"))
 
     nodes_by_topic: dict[str, list[KnowledgeNode]] = {}
     for node in nodes:
@@ -105,3 +138,108 @@ def build_learning_tree(*, user) -> list[dict]:
         return result
 
     return [build(t) for t in children_by_parent.get(None, [])]
+
+
+def get_topic_children(*, topic: Topic) -> tuple[list[Topic], list[KnowledgeNode]]:
+    """
+    JA: 検索セッションのドリルダウンUI用。指定Topic直下の子Topicと、直属の
+        KnowledgeNodeを返す。
+        【設計変更】origin_node__isnull=Trueの絞り込みは不要になった。
+    VI: Dùng cho UI duyệt sâu dần của phiên tìm kiếm. Trả về Topic con trực
+        tiếp và KnowledgeNode trực thuộc topic.
+        【Thay đổi thiết kế】Không còn cần lọc origin_node__isnull=True.
+    """
+    child_topics = list(Topic.objects.filter(parent=topic).order_by("position", "created_at"))
+    nodes = list(KnowledgeNode.objects.filter(topic=topic).order_by("created_at"))
+    return child_topics, nodes
+
+
+def _descendant_topic_ids(topic: Topic) -> list:
+    """
+    JA: topic自身を含む、配下すべてのTopic idを再帰的に集める(検索範囲の特定用)。
+        同一userのTopicをまとめて1回で取得し、Python側で親子関係を辿ることで
+        深さ分だけクエリを発行するのを避ける。
+    VI: Thu thập id của chính topic và toàn bộ Topic con cháu (đệ quy), dùng để
+        xác định phạm vi tìm kiếm. Lấy一次 toàn bộ Topic của cùng user rồi duyệt
+        quan hệ cha/con ở phía Python để tránh tốn 1 query cho mỗi tầng sâu.
+    """
+    all_topics = Topic.objects.filter(user_id=topic.user_id).only("id", "parent_id")
+    children_by_parent: dict = {}
+    for t in all_topics:
+        children_by_parent.setdefault(t.parent_id, []).append(t.id)
+
+    ids = [topic.id]
+    stack = [topic.id]
+    while stack:
+        current = stack.pop()
+        for child_id in children_by_parent.get(current, []):
+            ids.append(child_id)
+            stack.append(child_id)
+    return ids
+
+
+def search_knowledge_nodes(*, topic: Topic, query: str) -> list[KnowledgeNode]:
+    """
+    JA: topic配下(自身を含む)を再帰的に検索し、title/contentにqueryを含む
+        KnowledgeNodeを返す。
+        【設計変更】origin_node__isnull=Trueの絞り込みは不要になった
+        (AI生成の使い捨て類題自体が存在しなくなったため)。
+    VI: Tìm đệ quy trong phạm vi topic (bao gồm chính nó), trả về
+        KnowledgeNode có title/content chứa query.
+        【Thay đổi thiết kế】Không còn cần lọc origin_node__isnull=True
+        (vì node類題 dùng một lần do AI sinh không còn tồn tại nữa).
+    """
+    query = (query or "").strip()
+    if not query:
+        raise ValidationError("q is required")
+
+    # JA: 履歴記録は検索そのものの成否に影響させない副作用として最後に行う。
+    # VI: Việc ghi lịch sử là tác dụng phụ, đặt sau cùng, không ảnh hưởng kết quả tìm kiếm.
+    SearchHistory.objects.create(user_id=topic.user_id, topic=topic, query=query)
+
+    topic_ids = _descendant_topic_ids(topic)
+    return list(
+        KnowledgeNode.objects.filter(topic_id__in=topic_ids)
+        .filter(Q(title__icontains=query) | Q(content__icontains=query))
+        .order_by("created_at")
+    )
+
+
+# JA: 検索履歴として保持する最大件数(時系列スタック表示用)。SearchHistoryViewSet側で使う。
+# VI: Số lượng tối đa giữ lại trong lịch sử tìm kiếm (dùng cho hiển thị kiểu ngăn xếp
+#     theo thời gian). Dùng ở phía SearchHistoryViewSet.
+SEARCH_HISTORY_LIMIT = 50
+
+
+def suggest_topic_keyword(*, description: str) -> list[str]:
+    """
+    JA: 単語がわからないユーザーが曖昧な言葉で説明した内容から、AIに学習カテゴリ名の
+        候補を1〜5個提案させる。実際の検索は行わず、候補単語のリストだけを返す
+        (呼び出し側が別途 /api/topics/{id}/search/ を叩く想定)。
+    VI: Từ mô tả mơ hồ của user không nhớ tên chính xác, nhờ AI gợi ý 1-5 từ ứng viên
+        cho tên danh mục học tập. Không tự tìm kiếm, chỉ trả về danh sách từ ứng viên
+        (bên gọi tự dùng để gọi riêng /api/topics/{id}/search/).
+    """
+    description = (description or "").strip()
+    if not description:
+        raise ValidationError("description is required")
+
+    llm = get_llm()
+    messages = [
+        ChatMessage(role="system", content=_AI_SEARCH_SYSTEM_PROMPT),
+        ChatMessage(role="user", content=description),
+    ]
+    result = llm.chat(messages)
+
+    # JA: カンマ・読点・改行のいずれで区切られても対応し、重複を除きつつ順序維持、
+    #     最大5件に絞る。
+    # VI: Chấp nhận phân tách bằng dấu phẩy, dấu phẩy tiếng Nhật hoặc xuống dòng;
+    #     loại trùng nhưng giữ thứ tự, giới hạn tối đa 5 mục.
+    candidates = [c.strip() for c in re.split(r"[,、\n]", result.text) if c.strip()]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique[:5]

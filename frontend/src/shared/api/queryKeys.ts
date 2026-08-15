@@ -28,4 +28,13 @@ export const queryKeys = {
     all: ['learningTree'] as const,
     list: () => [...queryKeys.learningTree.all, 'list'] as const,
   },
+  // JA: Topic(学習木のカテゴリ)のクエリキー。list()はルート直下、children(id)は
+  //     指定Topic直下(フォルダのドリルダウン)。
+  // VI: Key cho Topic (danh mục của cây học tập). list() là gốc, children(id) là
+  //     trực thuộc Topic chỉ định (duyệt sâu dần theo thư mục).
+  topics: {
+    all: ['topics'] as const,
+    list: () => [...queryKeys.topics.all, 'list'] as const,
+    children: (topicId: string) => [...queryKeys.topics.all, 'children', topicId] as const,
+  },
 }

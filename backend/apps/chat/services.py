@@ -1,20 +1,25 @@
-# JA: Chat機能と ReviewLog / KnowledgeNode の連携ロジック + AI応答生成・分岐推定・会話履歴
-# VI: Logic kết nối giữa Chat, ReviewLog, KnowledgeNode + sinh câu trả lời AI, đoán nhánh, nhớ lịch sử hội thoại
+# JA: Chat機能の純粋な業務ロジック（HTTP非依存）
+#     【統合2026-08-15】チャット機能ブランチの「分岐推定」(AIが親ノードを推定し
+#     ユーザーが確認する)を取り込んだ。復習の記録(Attempt/ReviewLog)は develop の
+#     設計に合わせてある: このモジュールは ReviewLog を直接作らず、Attempt を
+#     完了させて apps.reviews.services.record_review_result に委譲する。
+# VI: Logic nghiệp vụ thuần của tính năng Chat (không phụ thuộc HTTP).
+#     【Tích hợp 2026-08-15】Đã lấy tính năng "đoán nhánh" (AI đoán node cha, user xác nhận)
+#     từ nhánh tính năng Chat. Phần ghi nhận ôn tập (Attempt/ReviewLog) tuân theo thiết kế
+#     của develop: module này KHÔNG tự tạo ReviewLog, mà đóng Attempt rồi ủy thác cho
+#     apps.reviews.services.record_review_result.
 import json
 import logging
 import re
-from typing import Any
 
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.ai.base import ChatMessage as AIChatMessage
 from apps.ai.base import ChatResult
 from apps.ai.client import get_llm
-from apps.reviews.models import ReviewLog
-from apps.topics.models import KnowledgeNode
+from apps.common.exceptions import ValidationError
 
-from .models import ChatMessage, ChatSession
+from .models import Attempt, ChatMessage, ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +38,10 @@ STRICT RULES:
 6. Keep responses concise (a few sentences), conversational, and encouraging.
 """
 
-# JA: 分岐推定およびAI Tutor用のシステムプロンプト定義（Option 1）
-# VI: Định nghĩa system prompt cho AI Tutor và đoán nhánh tư duy (Option 1)
+# JA: 分岐推定用のシステムプロンプト。ユーザーの新しい質問が「直前の会話の続き」なのか
+#     「過去の古い質問への出戻り(分岐)」なのかをAIに判定させ、JSONで返させる。
+# VI: System prompt cho việc đoán nhánh. Cho AI phán đoán câu hỏi mới là "nối tiếp câu liền trước"
+#     hay "quay lại rẽ nhánh từ câu hỏi cũ", và trả về dạng JSON.
 BRANCHING_SYSTEM_PROMPT = """
 あなたは学習者を指導する AI Tutor です。
 ユーザーの質問に対してヒントを提供すると同時に、思考ツリーの分岐先（親ノード）を正確に推定してください。
@@ -55,81 +62,57 @@ BRANCHING_SYSTEM_PROMPT = """
 }
 """
 
-NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
-NODE_TOPIC_MAX_LEN = 100
+# JA: ★フリーチャット(knowledge_node未設定)が「完了」した際、会話内容から
+#     知識ノードのtitle/contentをAIに要約させるための指示。
+# VI: ★Chỉ thị để AI tóm tắt nội dung hội thoại thành title/content của
+#     knowledge node, khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn thành".
+NODE_SUMMARY_SYSTEM_PROMPT = """
+You are summarizing a tutoring conversation into a permanent study note for the student.
 
+Based on the conversation so far, write a concise study note capturing what the student learned.
+
+OUTPUT FORMAT (STRICT):
+- Line 1: a short title (a few words, no trailing punctuation)
+- From line 2 onward: a concise explanation of the concept, written for the student's own future review
+
+Do not include any preamble, meta-commentary, or markdown formatting.
+"""
+
+NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
+SESSION_NODE_TITLE_MAX_LEN = 255
+# JA: 分岐推定でAIに見せる過去質問1件あたりの最大文字数 / VI: Độ dài tối đa mỗi câu hỏi cũ đưa cho AI
+NODE_TOPIC_MAX_LEN = 100
+# JA: AIに渡す会話履歴の最大件数と1件あたりの最大文字数（トークン節約）
+# VI: Số lượng và độ dài tối đa của lịch sử hội thoại đưa cho AI (tiết kiệm token)
 MAX_HISTORY_MESSAGES = 20
 HISTORY_MESSAGE_MAX_LEN = 600
 
 
-def create_chat_session_for_node(
-    *, user, node_id: int = None, title: str = "New Study Session"
-) -> ChatSession:
-    """
-    JA: 指定された KnowledgeNode に基づいて ChatSession (Attempt) を作成
-    VI: Tạo ChatSession (Attempt) mới dựa trên KnowledgeNode được chỉ định
-    """
+def create_chat_session_for_node(*, user, node_id=None, title: str = "New Session") -> ChatSession:
+    # JA: 他アプリ所有のKnowledgeNodeは、所有権チェック込みの窓口経由で取得する
+    #     (CONVENTIONS.md §10)。直接 objects.filter(id=...) で引くと、他人のノードに
+    #     自分のセッションを紐付けられてしまう。
+    # VI: KnowledgeNode thuộc app khác nên phải lấy qua cửa ngõ có kiểm tra quyền sở hữu
+    #     (CONVENTIONS.md §10). Nếu tự query objects.filter(id=...) thì user có thể gắn
+    #     session của mình vào node của người khác.
+    from apps.topics import services as topics_services
+
     node = None
     if node_id:
-        node = KnowledgeNode.objects.filter(id=node_id).first()
-        if not node:
-            raise ValidationError("Knowledge Node không tồn tại.")
-        if title in ["New Study Session", "New Chat Session"]:
-            title = f"Học: {node.title}"
+        node = topics_services.get_owned_knowledge_node(user=user, node_id=node_id)
 
-    session = ChatSession.objects.create(
-        user=user,
-        knowledge_node=node,
-        title=title,
-        hint_count=0,
-    )
-    return session
+        existing = ChatSession.objects.filter(knowledge_node=node, user=user).first()
+        if existing:
+            return existing
 
+        if title == "New Session":
+            title = f"学習: {node.title}"
 
-def record_hint_or_completion(
-    *, session: ChatSession, action_type: str, response_time_seconds: int = 60
-):
-    """
-    JA: ヒントカウントの更新および学習完了時 (COMPLETE) の ReviewLog 作成
-    VI: Cập nhật hint_count và tự động tạo ReviewLog khi hoàn thành (COMPLETE)
-    """
-    if action_type == "HINT":
-        session.hint_count += 1
-        session.save(update_fields=["hint_count"])
-
-    if action_type == "COMPLETE":
-        session.completed_at = timezone.now()
-        session.save(update_fields=["completed_at"])
-
-        if session.hint_count == 0:
-            rating = 5
-        elif session.hint_count == 1:
-            rating = 4
-        elif session.hint_count == 2:
-            rating = 3
-        elif session.hint_count == 3:
-            rating = 2
-        elif session.hint_count == 4:
-            rating = 1
-        else:
-            rating = 0
-
-        review_log = ReviewLog.objects.create(
-            attempt=session,
-            performance_rating=rating,
-            response_time_seconds=response_time_seconds,
-        )
-        logger.info(
-            "JA: ReviewLog を作成しました (Rating: %s) / VI: Đã tạo ReviewLog (Rating: %s)",
-            rating,
-            rating,
-        )
-        return review_log
-
-    return None
+    return ChatSession.objects.create(user=user, knowledge_node=node, title=title)
 
 
 def _extract_text(raw_response) -> str:
+    """JA: LLMの戻り値からテキストを取り出す / VI: Lấy text từ giá trị trả về của LLM"""
     if isinstance(raw_response, ChatResult):
         return raw_response.text
     if hasattr(raw_response, "text"):
@@ -138,6 +121,12 @@ def _extract_text(raw_response) -> str:
 
 
 def _extract_json(raw_text: str) -> dict | None:
+    """
+    JA: AIの応答からJSONを取り出す。JSON以外の前置きが混ざることがあるため、
+        素直にパースできなければ最初の { ... } を正規表現で拾って再挑戦する。
+    VI: Lấy JSON từ phản hồi của AI. Vì đôi khi AI thêm lời dẫn, nếu parse thẳng
+        không được thì dùng regex bắt cụm { ... } đầu tiên rồi thử lại.
+    """
     try:
         return json.loads(raw_text)
     except (json.JSONDecodeError, TypeError):
@@ -161,24 +150,21 @@ def _build_history_messages(session: ChatSession) -> list[AIChatMessage]:
     history = []
     for msg in reversed(list(past_messages)):
         role = "user" if msg.sender == ChatMessage.Sender.USER else "assistant"
-        content = msg.message_text[:HISTORY_MESSAGE_MAX_LEN]
-        history.append(AIChatMessage(role=role, content=content))
+        history.append(AIChatMessage(role=role, content=msg.message_text[:HISTORY_MESSAGE_MAX_LEN]))
     return history
 
 
 def _build_branching_instructions(user_nodes: list, text: str) -> str:
     """
-    JA: ノードインデックス形式で過去の質問履歴を整形（Option 2）。
-        直前のノードではなく、過去の古いノードへの分岐のみを明確に検出させる。
-    VI: Format lịch sử câu hỏi USER theo dạng Node Index kèm UUID (Option 2).
-        Chỉ thị AI nhận biết khi user quay lại rẽ nhánh từ một node cũ hơn node ngay liền trước.
+    JA: 過去のUSER質問をノードIDつきの一覧に整形し、分岐推定の指示文を組み立てる。
+        直前のノードではなく、より古いノードへの分岐だけを検出させるのが狙い。
+    VI: Format các câu hỏi USER cũ thành danh sách kèm Node ID và dựng chỉ thị đoán nhánh.
+        Mục tiêu: chỉ phát hiện rẽ nhánh về node cũ hơn, không phải node liền trước.
     """
-    history_formatted = []
-    for idx, msg in enumerate(user_nodes, start=1):
-        history_formatted.append(
-            f"- [Node ID: {msg.id}] (Bước {idx}): {msg.message_text[:NODE_TOPIC_MAX_LEN]}"
-        )
-
+    history_formatted = [
+        f"- [Node ID: {msg.id}] (Bước {idx}): {msg.message_text[:NODE_TOPIC_MAX_LEN]}"
+        for idx, msg in enumerate(user_nodes, start=1)
+    ]
     history_str = "\n".join(history_formatted) if history_formatted else "Không có câu hỏi cũ nào."
 
     return f"""
@@ -199,15 +185,20 @@ def _build_branching_instructions(user_nodes: list, text: str) -> str:
 
 
 def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: str, text: str):
+    """
+    JA: AIの回答本文と、分岐推定の結果(推定親ノード・確信度・確定フラグ)を返す。
+        ユーザーが明示的に親を指定した場合、または質問がまだ1件以下の場合は
+        推定不要なので通常の回答だけを生成する(初回から確認UIが出るのを防ぐ)。
+    VI: Trả về nội dung trả lời của AI kèm kết quả đoán nhánh (node cha đoán được,
+        độ tin cậy, cờ đã chốt). Nếu user đã tự chỉ định node cha, hoặc mới có <= 1 câu hỏi,
+        thì không cần đoán (tránh hiện UI xác nhận ngay từ câu đầu).
+    """
     llm = get_llm()
     history = _build_history_messages(session)
-
-    # Lấy tất cả các câu hỏi cũ của USER trong session
     user_nodes = list(
         session.messages.filter(sender=ChatMessage.Sender.USER).order_by("created_at")
     )
 
-    # NẾU MỚI CHỈ CÓ 0 HOẶC 1 CÂU HỎI USER: Không cần đoán nhánh (tránh hiện Confirm thừa ở câu đầu)
     if explicit_parent is not None or len(user_nodes) <= 1:
         messages_payload = [
             AIChatMessage(role="system", content=SYSTEM_PROMPT),
@@ -215,159 +206,141 @@ def _generate_ai_answer(*, session: ChatSession, explicit_parent, action_type: s
             AIChatMessage(role="user", content=f"Action: {action_type}\nMessage: {text}"),
         ]
         try:
-            raw_response = llm.chat(messages_payload)
-            return _extract_text(raw_response), None, "", True
+            return _extract_text(llm.chat(messages_payload)), None, "", True
         except Exception as e:
-            logger.error("Lỗi tạo phản hồi AI: %s", e)
-            return f"[AI Tutor] Lỗi: {str(e)}", None, "", True
+            logger.error("JA: AI応答生成エラー: %s / VI: Lỗi tạo phản hồi AI: %s", e, e)
+            return f"[AI Tutor] Lỗi tạo phản hồi từ AI: {e}", None, "", True
 
-    # Build prompt đoán nhánh nâng cao (Option 1 + Option 2)
-    branching_instructions = _build_branching_instructions(user_nodes, text)
     messages_payload = [
         AIChatMessage(role="system", content=SYSTEM_PROMPT),
         *history,
-        AIChatMessage(role="user", content=branching_instructions),
+        AIChatMessage(role="user", content=_build_branching_instructions(user_nodes, text)),
     ]
 
     try:
-        raw_response = llm.chat(messages_payload)
-        raw_text = _extract_text(raw_response)
+        raw_text = _extract_text(llm.chat(messages_payload))
         parsed = _extract_json(raw_text)
 
         if parsed and isinstance(parsed, dict) and "answer" in parsed:
-            ai_text = parsed["answer"]
             parent_confidence = parsed.get("confidence", "low") or "low"
             suggested_parent = None
             suggested_id = parsed.get("suggested_parent_id")
 
-            # Chỉ chấp nhận suggested_parent nếu ID đó thực sự tồn tại trong DB
+            # JA: AIが挙げたIDが実在する場合だけ採用する / VI: Chỉ nhận ID nếu thực sự tồn tại trong DB
             if suggested_id and str(suggested_id).lower() != "null":
                 suggested_parent = ChatMessage.objects.filter(
                     session=session, id=suggested_id
                 ).first()
 
-            # Nếu AI tự tin rẽ nhánh về câu cũ (confidence == "high"), đặt parent_confirmed = False để hiện Confirm
-            parent_confirmed = False if (parent_confidence == "high" and suggested_parent) else True
-            return ai_text, suggested_parent, parent_confidence, parent_confirmed
+            # JA: 確信度が high の時だけ未確定にして、フロントに確認UIを出させる。
+            # VI: Chỉ để chưa chốt khi độ tin cậy là high, để frontend hiện UI xác nhận.
+            parent_confirmed = not (parent_confidence == "high" and suggested_parent)
+            return parsed["answer"], suggested_parent, parent_confidence, parent_confirmed
 
-        # Fallback nếu AI trả về văn bản thường thay vì JSON
+        # JA: JSONでなく普通の文章が返ってきた場合はそのまま回答として扱う。
+        # VI: Nếu AI trả về văn bản thường thay vì JSON thì dùng luôn làm câu trả lời.
         return raw_text, None, "", True
     except Exception as e:
-        logger.error("Lỗi tạo phản hồi AI: %s", e)
-        return f"[AI Tutor] Lỗi: {str(e)}", None, "", True
+        logger.error("JA: AI応答生成エラー: %s / VI: Lỗi tạo phản hồi AI: %s", e, e)
+        return f"[AI Tutor] Lỗi tạo phản hồi từ AI: {e}", None, "", True
 
 
-def send_message_and_get_ai_response(
-    *,
-    session: ChatSession,
-    user_message_text: str = "",
-    parent_message_id: str = None,
-    action_type: str = "ANSWER",
-) -> dict[str, Any]:
-    text = (user_message_text or "").strip()
-
-    if action_type in NEEDS_AI_ANSWER and not text:
-        raise ValidationError("メッセージ内容は必須です / Nội dung tin nhắn là bắt buộc")
-
-    if action_type in ["HINT", "COMPLETE"]:
-        record_hint_or_completion(session=session, action_type=action_type)
-
-    explicit_parent = None
-    if parent_message_id:
-        explicit_parent = ChatMessage.objects.filter(id=parent_message_id, session=session).first()
-
-    suggested_parent = None
-    parent_confidence = ""
-    parent_confirmed = True
-
-    if action_type == "HINT":
-        ai_text = f"Gợi ý #{session.hint_count}: Hãy tập trung vào định nghĩa cốt lõi của bài học."
-    elif action_type == "COMPLETE":
-        ai_text = (
-            "Bài học đã hoàn thành! Hệ thống đã tự động lưu kết quả ôn tập vào lịch sử của bạn."
+def _summarize_session_as_node(session: ChatSession) -> tuple[str, str]:
+    """
+    JA: セッションの会話履歴全体をAIに渡し、知識ノードのtitle/contentを要約
+        させる。1行目をtitle、2行目以降をcontentとして解釈する規約。
+    VI: Đưa toàn bộ lịch sử hội thoại của session cho AI, nhờ tóm tắt thành
+        title/content của knowledge node. Quy ước: dòng 1 là title, từ dòng
+        2 trở đi là content.
+    """
+    llm = get_llm()
+    history = [
+        AIChatMessage(
+            role="user" if msg.sender == ChatMessage.Sender.USER else "assistant",
+            content=msg.message_text[:600],
         )
+        for msg in session.messages.order_by("created_at")
+    ]
+    messages_payload = [
+        AIChatMessage(role="system", content=NODE_SUMMARY_SYSTEM_PROMPT),
+        *history,
+        AIChatMessage(
+            role="user",
+            content="Summarize this conversation into a study note title and content now.",
+        ),
+    ]
+    raw_response = llm.chat(messages_payload)
+    if isinstance(raw_response, ChatResult):
+        text = raw_response.text
+    elif hasattr(raw_response, "text"):
+        text = raw_response.text
     else:
-        ai_text, suggested_parent, parent_confidence, parent_confirmed = _generate_ai_answer(
-            session=session, explicit_parent=explicit_parent, action_type=action_type, text=text
-        )
+        text = str(raw_response)
+    text = text.strip()
 
-    # Chọn final_parent cho user_message
-    final_parent = explicit_parent or suggested_parent
-    if final_parent is None:
-        final_parent = session.messages.order_by("-created_at").first()
+    lines = text.splitlines()
+    title = (lines[0].strip() if lines else "")[:SESSION_NODE_TITLE_MAX_LEN]
+    content = "\n".join(lines[1:]).strip() or text
+    return title or session.title, content
 
-    user_message = None
-    if text or action_type != "ANSWER":
-        is_hint_flag = action_type == "HINT"
-        text_to_save = text if text else f"[{action_type}] Request"
-        user_node_type = (
-            ChatMessage.NodeType.CHANGE_METHOD
-            if action_type == "REQUEST_CHANGE_METHOD"
-            else ChatMessage.NodeType.ANSWER
-        )
-        user_message = ChatMessage.objects.create(
-            session=session,
-            parent_message=final_parent,
-            suggested_parent=suggested_parent,
-            parent_confidence=parent_confidence,
-            parent_confirmed=parent_confirmed,
-            sender=ChatMessage.Sender.USER,
-            message_text=text_to_save,
-            is_hint=is_hint_flag,
-            node_type=user_node_type,
-        )
 
-    ai_message = ChatMessage.objects.create(
-        session=session,
-        parent_message=user_message if user_message else explicit_parent,
-        sender=ChatMessage.Sender.AI,
-        message_text=ai_text,
-        is_hint=(action_type == "HINT"),
-        node_type=ChatMessage.NodeType.STEP,
+def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
+    """
+    JA: フリーチャット(knowledge_node未設定)が「完了」した時に呼ばれる。
+        会話内容からAIにtitle/contentを要約させ、指定Topic配下に新しい
+        KnowledgeNodeとして保存し、このセッションと1:1(OneToOne)で紐付ける。
+        KnowledgeNodeの作成自体は所有アプリ(apps.topics)のservices経由で行う
+        (このアプリからKnowledgeNode.objects.createを直接呼ばない)。
+    VI: Được gọi khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn
+        thành". Nhờ AI tóm tắt hội thoại thành title/content, lưu thành một
+        KnowledgeNode mới dưới Topic được chỉ định, và gắn 1:1 (OneToOne)
+        với session này. Việc tạo KnowledgeNode được ủy thác qua services
+        của app sở hữu (apps.topics), không gọi thẳng
+        KnowledgeNode.objects.create từ app này.
+    """
+    from apps.topics import services as topics_services
+
+    topic = topics_services.get_owned_topic(user=user, topic_id=topic_id)
+    title, content = _summarize_session_as_node(session)
+    node = topics_services.create_knowledge_node(
+        user=user, topic=topic, title=title, content=content
     )
 
-    return {"user_message": user_message, "ai_message": ai_message}
+    session.knowledge_node = node
+    session.save(update_fields=["knowledge_node"])
+    return node
 
 
-def confirm_message_parent(*, session: ChatSession, message_id, parent_message_id) -> ChatMessage:
-    """
-    JA: ユーザーが分岐先（親ノード）を確定または thay đổi するロジック。
-        parent_message_id と parent_message_id (DBカラム) の両方を確実に更新・保存する。
-    VI: Logic user xác nhận hoặc đổi node cha (rẽ nhánh).
-        Đảm bảo cập nhật và lưu cả mối quan hệ parent_message lẫn cột parent_message_id dưới DB.
-    """
-    # JA: 対象のユーザーメッセージを取得 / VI: Lấy tin nhắn của USER cần xác nhận
-    message = ChatMessage.objects.filter(
-        session=session, id=message_id, sender=ChatMessage.Sender.USER
-    ).first()
-
-    if message is None:
-        raise ValidationError("メッセージが見つかりません / Không tìm thấy tin nhắn")
-
-    # JA: parent_message_id が dict 型で渡された場合の bóc tách 処理 / VI: Xử lý bóc tách nếu truyền nhầm dạng Dict/Object
-    actual_parent_id = parent_message_id
-    if isinstance(parent_message_id, dict):
-        actual_parent_id = parent_message_id.get("id")
-
-    parent = None
-    if actual_parent_id:
-        parent = ChatMessage.objects.filter(session=session, id=actual_parent_id).first()
-        if parent is None:
-            raise ValidationError("親メッセージが見つかりません / Không tìm thấy tin nhắn cha")
-
-    # JA: 親ノードの更新と確認フラグの設定 / VI: Cập nhật node cha và đánh dấu đã confirm
-    message.parent_message = parent
-    message.parent_confirmed = True
-
-    # JA: ★重要：DBの parent_message_id カラムを確実に保存するために update_fields に chỉ định する
-    # VI: ★Quan trọng: Chỉ định rõ parent_message_id trong update_fields để ghi nhận xuống DB ngay lập tức
-    message.save(update_fields=["parent_message", "parent_message_id", "parent_confirmed"])
-
-    return message
+def get_or_create_active_attempt(*, session: ChatSession) -> Attempt:
+    attempt = session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
+    if attempt is None:
+        attempt = Attempt.objects.create(chat_session=session)
+    return attempt
 
 
-def get_session_graph_data(*, session: ChatSession) -> dict[str, Any]:
+def record_hint_or_completion(
+    *, session: ChatSession, action_type: str, understood: bool | None = None
+):
+    attempt = get_or_create_active_attempt(session=session)
+
+    if action_type == "HINT":
+        attempt.hint_count += 1
+        attempt.save(update_fields=["hint_count"])
+
+    if action_type == "COMPLETE":
+        attempt.completed_at = timezone.now()
+        attempt.save(update_fields=["completed_at"])
+
+        from apps.reviews.services import record_review_result
+
+        record_review_result(attempt, bool(understood))
+
+    return attempt
+
+
+def get_session_graph_data(*, session: ChatSession) -> dict:
     messages = session.messages.all().order_by("created_at")
+
     nodes = []
     edges = []
 
@@ -375,19 +348,135 @@ def get_session_graph_data(*, session: ChatSession) -> dict[str, Any]:
         nodes.append(
             {
                 "id": str(msg.id),
-                "sender": msg.sender,
-                "text": msg.message_text,
-                "is_hint": msg.is_hint,
-                "node_type": msg.node_type,
-                "created_at": msg.created_at.isoformat(),
-                "parent_confirmed": msg.parent_confirmed,
-                "parent_confidence": msg.parent_confidence,
-                "suggested_parent_id": str(msg.suggested_parent_id)
-                if msg.suggested_parent_id
-                else None,
+                "type": "stepNode" if msg.node_type == "STEP" else "answerNode",
+                "data": {
+                    "label": msg.sender,
+                    "text": msg.message_text,
+                    "node_type": msg.node_type,
+                },
             }
         )
-        if msg.parent_message_id:
-            edges.append({"source": str(msg.parent_message_id), "target": str(msg.id)})
 
-    return {"session_id": str(session.id), "nodes": nodes, "edges": edges}
+        if msg.parent_message_id:
+            edges.append(
+                {
+                    "id": f"e-{msg.parent_message_id}-{msg.id}",
+                    "source": str(msg.parent_message_id),
+                    "target": str(msg.id),
+                }
+            )
+
+    return {"nodes": nodes, "edges": edges}
+
+
+def send_message_and_get_ai_response(
+    *,
+    session: ChatSession,
+    user_message_text: str,
+    parent_message_id=None,
+    action_type: str = "ANSWER",
+    understood: bool | None = None,
+    topic_id=None,
+) -> dict:
+    text = (user_message_text or "").strip()
+    if action_type in NEEDS_AI_ANSWER and not text:
+        raise ValidationError("メッセージ内容は必須です / Nội dung tin nhắn là bắt buộc")
+
+    # JA: ★フリーチャット(knowledge_node未設定)がCOMPLETEした瞬間に、初めて
+    #     知識ノードを作成しこのセッションと1:1で紐付ける。既にノードがある
+    #     セッション(復習チャット)ではここは通らない。record_review_result は
+    #     knowledge_node必須のため、この処理を先に済ませておく必要がある。
+    # VI: ★Khi một phiên chat tự do (chưa gắn knowledge_node) COMPLETE lần
+    #     đầu, tạo mới knowledge node và gắn 1:1 với session này. Session đã
+    #     có sẵn node (chat ôn tập) sẽ không đi qua nhánh này. Vì
+    #     record_review_result bắt buộc phải có knowledge_node, bước này cần
+    #     làm trước.
+    if action_type == "COMPLETE" and session.knowledge_node_id is None:
+        if not topic_id:
+            raise ValidationError(
+                "知識ノードとして保存するTopicを選択してください / Vui lòng chọn Topic để lưu"
+            )
+        create_knowledge_node_from_session(session=session, user=session.user, topic_id=topic_id)
+
+    if action_type in ("HINT", "COMPLETE"):
+        record_hint_or_completion(session=session, action_type=action_type, understood=understood)
+
+    # JA: ユーザーが「このノードへの返信」を明示した場合の親。未指定ならAIに推定させる。
+    # VI: Node cha khi user chủ động chọn "trả lời node này". Không chỉ định thì để AI đoán.
+    explicit_parent = None
+    if parent_message_id:
+        explicit_parent = ChatMessage.objects.filter(session=session, id=parent_message_id).first()
+
+    suggested_parent = None
+    parent_confidence = ""
+    parent_confirmed = True
+
+    if action_type == "HINT":
+        ai_text = "続けてみましょう。分からない部分をもう少し詳しく教えてください。"
+    elif action_type == "COMPLETE":
+        ai_text = "お疲れ様でした！学習の記録を保存しました。"
+    else:
+        ai_text, suggested_parent, parent_confidence, parent_confirmed = _generate_ai_answer(
+            session=session, explicit_parent=explicit_parent, action_type=action_type, text=text
+        )
+
+    user_node_type = (
+        ChatMessage.NodeType.ANSWER
+        if action_type == "ANSWER"
+        else ChatMessage.NodeType.CHANGE_METHOD
+    )
+    user_msg = None
+    if text:
+        # JA: 親は「明示指定 > AI推定 > 直前のメッセージ」の優先順で決める。
+        # VI: Node cha ưu tiên: user chỉ định > AI đoán > tin nhắn ngay trước đó.
+        final_parent = (
+            explicit_parent or suggested_parent or session.messages.order_by("-created_at").first()
+        )
+        user_msg = ChatMessage.objects.create(
+            session=session,
+            parent_message=final_parent,
+            suggested_parent=suggested_parent,
+            parent_confidence=parent_confidence,
+            parent_confirmed=parent_confirmed,
+            sender=ChatMessage.Sender.USER,
+            message_text=text,
+            node_type=user_node_type,
+        )
+
+    ai_msg = ChatMessage.objects.create(
+        session=session,
+        parent_message=user_msg,
+        sender=ChatMessage.Sender.AI,
+        message_text=str(ai_text),
+        node_type=ChatMessage.NodeType.STEP,
+        is_hint=(action_type == "HINT"),
+    )
+
+    return {"user_message": user_msg, "ai_message": ai_msg}
+
+
+def confirm_message_parent(*, session: ChatSession, message_id, parent_message_id) -> ChatMessage:
+    """
+    JA: 分岐確認UIでユーザーが親ノードを確定/変更したときの処理。
+        AI推定(suggested_parent)を採用する場合も、元の親のままにする場合も、
+        どちらも「ユーザーが確認済み」として parent_confirmed=True にする。
+    VI: Xử lý khi user chốt/đổi node cha ở UI xác nhận rẽ nhánh.
+        Dù chấp nhận đề xuất của AI (suggested_parent) hay giữ nguyên node cha cũ,
+        đều đánh dấu parent_confirmed=True vì user đã xác nhận.
+    """
+    message = ChatMessage.objects.filter(
+        session=session, id=message_id, sender=ChatMessage.Sender.USER
+    ).first()
+    if message is None:
+        raise ValidationError("メッセージが見つかりません / Không tìm thấy tin nhắn")
+
+    parent = None
+    if parent_message_id:
+        parent = ChatMessage.objects.filter(session=session, id=parent_message_id).first()
+        if parent is None:
+            raise ValidationError("親メッセージが見つかりません / Không tìm thấy tin nhắn cha")
+
+    message.parent_message = parent
+    message.parent_confirmed = True
+    message.save(update_fields=["parent_message", "parent_confirmed"])
+    return message
