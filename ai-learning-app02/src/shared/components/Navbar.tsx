@@ -19,9 +19,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onTabChange }) => {
           </div>
           <div>
             <h1 className="font-semibold text-slate-800 text-base leading-tight">
-              AI Tutor <span className="text-xs font-normal text-indigo-500 ml-1">AI学習助手</span>
+              AI Tutor
             </h1>
-            <p className="text-[11px] text-slate-400">Hỗ trợ học tập thông minh</p>
           </div>
         </div>
 

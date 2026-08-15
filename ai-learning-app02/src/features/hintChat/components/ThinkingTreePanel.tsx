@@ -1,16 +1,18 @@
 /**
  * features/hintChat/components/ThinkingTreePanel.tsx
  *
- * JA: 思考ツリー表示コンポーネント (ReactFlow直挿し版)
- * VI: Component hiển thị Sơ đồ tư duy trực tiếp bằng ReactFlow (Dùng Tailwind CSS & Hỗ trợ Việt - Nhật)
+ * JA: 思考ツリー表示コンポーネント (ノードドラッグ移動対応 / 日英対応)
+ * VI: Component hiển thị Sơ đồ tư duy (Cho phép kéo thả di chuyển node / Hỗ trợ Việt - Nhật)
  */
 
-import React, { useMemo } from 'react'
+import React, { useEffect } from 'react'
 import {
   ReactFlow,
   Background,
   Controls,
   BackgroundVariant,
+  useNodesState,
+  useEdgesState,
   type Node,
   type Edge,
 } from '@xyflow/react'
@@ -22,8 +24,12 @@ interface ThinkingTreePanelProps {
 }
 
 export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }) => {
-  // Tính toán Nodes và Edges trực tiếp từ danh sách tin nhắn
-  const { nodes, edges } = useMemo(() => {
+  // Dùng useNodesState & useEdgesState để ReactFlow tự quản lý vị trí khi người dùng drag/drop
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  // Lắng nghe thay đổi của messages để cập nhật danh sách node
+  useEffect(() => {
     const generatedNodes: Node[] = []
     const generatedEdges: Edge[] = []
 
@@ -33,21 +39,23 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
     })
 
     if (userMsgs.length === 0) {
-      // Node mặc định ban đầu khi chưa gửi tin nhắn
+      // Node mặc định ban đầu
       generatedNodes.push(
         {
           id: 'step-1',
           data: { label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán' },
           position: { x: 40, y: 30 },
+          draggable: true,
           className:
-            '!border !border-gray-300 !rounded-md !p-2 !text-[11px] !text-center !bg-white !shadow-sm !w-[170px]',
+            '!border !border-blue-300 !rounded-lg !p-2.5 !text-[11px] !text-center !bg-white !shadow-sm !w-[180px] !cursor-grab active:!cursor-grabbing',
         },
         {
           id: 'step-2',
           data: { label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp' },
           position: { x: 40, y: 130 },
+          draggable: true,
           className:
-            '!border !border-gray-300 !rounded-md !p-2 !text-[11px] !text-center !bg-white !shadow-sm !w-[170px]',
+            '!border !border-gray-300 !rounded-lg !p-2.5 !text-[11px] !text-center !bg-white !shadow-sm !w-[180px] !cursor-grab active:!cursor-grabbing',
         }
       )
 
@@ -64,10 +72,6 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
         const stepNum = idx + 1
         const nodeId = String(msg.id || `node-${stepNum}`).toLowerCase()
 
-        // Tính vị trí xếp dọc đơn giản
-        const posX = 40
-        const posY = 30 + idx * 90
-
         generatedNodes.push({
           id: nodeId,
           data: {
@@ -75,9 +79,10 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
               text.length > 15 ? text.substring(0, 15) + '...' : text
             } / Bước ${stepNum}`,
           },
-          position: { x: posX, y: posY },
+          position: { x: 40, y: 30 + idx * 95 },
+          draggable: true, // Cho phép kéo thả
           className:
-            '!border !border-gray-300 !rounded-md !p-2 !text-[11px] !text-center !bg-white !shadow-sm !w-[170px] !cursor-grab',
+            '!border !border-blue-400 !rounded-lg !p-2.5 !text-[11px] !text-center !bg-white !shadow-sm !w-[180px] !cursor-grab active:!cursor-grabbing',
         })
 
         if (idx > 0) {
@@ -93,8 +98,9 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
       })
     }
 
-    return { nodes: generatedNodes, edges: generatedEdges }
-  }, [messages])
+    setNodes(generatedNodes)
+    setEdges(generatedEdges)
+  }, [messages, setNodes, setEdges])
 
   return (
     <div className="flex h-[480px] w-full flex-col rounded-2xl border border-gray-200 bg-white p-3 box-border shadow-sm">
@@ -103,7 +109,9 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
         <h3 className="m-0 text-xs font-bold text-gray-800">
           🌿 思考プロセス / Tiến trình tư duy
         </h3>
-        <span className="text-[10px] text-gray-400">✋ Có thể kéo/thả node</span>
+        <span className="text-[10px] text-gray-400">
+          🖐️ ドラッグ可能 / Rê chuột để di chuyển node
+        </span>
       </div>
 
       {/* Khung ReactFlow */}
@@ -111,8 +119,11 @@ export const ThinkingTreePanel: React.FC<ThinkingTreePanelProps> = ({ messages }
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          fitView
+          onNodesChange={onNodesChange} // Giúp cập nhật tọa độ mới khi kéo
+          onEdgesChange={onEdgesChange}
           nodesDraggable={true}
+          nodesConnectable={false}
+          fitView
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#d1d5db" />
