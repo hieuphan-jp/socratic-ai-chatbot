@@ -1,14 +1,20 @@
 """
 apps/topics/models.py
 
-JA: 学習木構造のテーブル定義のみ（テーブル構造。業務ロジックは services.py）。
-    Topic はカテゴリ（棚）で自己参照の親子関係を持ち、KnowledgeNode は実際に
-    学んだ内容（本）で Topic に属する。KnowledgeNode の SM-2 用フィールドは
-    apps/reviews の ReviewSchedule に分離し、ここには構造のみを持たせる。
-VI: Chỉ định nghĩa cấu trúc bảng của cây học tập (logic nghiệp vụ ở services.py).
-    Topic là danh mục (kệ sách), có quan hệ cha/con tự tham chiếu. KnowledgeNode
-    là nội dung đã học thực tế (cuốn sách), thuộc về một Topic. Các trường cho
-    SM-2 tách sang ReviewSchedule của apps/reviews; ở đây chỉ giữ cấu trúc.
+JA: 学習木構造のテーブル定義のみ(業務ロジックは services.py)。
+    Topic はカテゴリ(棚)で自己参照の親子関係を持つ。KnowledgeNode は実際に
+    学んだ内容(本)で Topic に属する。
+    【設計変更 2026-08-13】復習機能がAIによる類似問題生成をやめたため、
+    origin_node(類題ノードの出自を示すためだけのフィールド)は削除した。
+    全てのKnowledgeNodeが常設ノードになる。
+VI: Chỉ định nghĩa cấu trúc bảng của cây học tập (logic nghiệp vụ ở
+    services.py). Topic là danh mục (kệ sách), có quan hệ cha/con tự
+    tham chiếu. KnowledgeNode là nội dung đã học thực tế (cuốn sách),
+    thuộc về một Topic.
+    【Thay đổi thiết kế 2026-08-13】Vì tính năng ôn tập không còn AI sinh
+    bài tương tự nữa, đã xóa origin_node (field chỉ dùng để đánh dấu
+    nguồn gốc của node được sinh). Mọi KnowledgeNode giờ đều là node cố
+    định.
 """
 
 from django.conf import settings
@@ -28,7 +34,7 @@ class Topic(BaseModel):
     )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
-    # JA: 兄弟内の表示順序。作成時に services.py が末尾番号を採番する
+    # JA: 兄弟間の表示順序。作成時に services.py が末尾番号を採番する
     # VI: Thứ tự hiển thị giữa các anh em. services.py cấp số ở cuối khi tạo
     position = models.PositiveIntegerField(default=0)
 
@@ -41,10 +47,6 @@ class Topic(BaseModel):
 
 class KnowledgeNode(BaseModel):
     topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name="nodes")
-    # JA: AI生成の類題の場合、生成元の常設ノードを指す / VI: Nếu là bài AI sinh, trỏ tới node cố định gốc
-    origin_node = models.ForeignKey(
-        "self", on_delete=models.CASCADE, null=True, blank=True, related_name="derived_nodes"
-    )
     title = models.CharField(max_length=255)
     content = models.TextField()
 
@@ -53,3 +55,24 @@ class KnowledgeNode(BaseModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+class SearchHistory(BaseModel):
+    # JA: 検索セッション(Topic.search)が呼ばれるたびに1件記録する検索履歴。
+    #     BaseModelの既定順序(-created_at)がそのまま「新しい順のスタック」になる。
+    #     user は topic.user と常に一致する(所有権チェックはsearch_knowledge_nodes側で
+    #     既に済んでいる前提のため、ここでは重複して持たせるだけ)。
+    # VI: Lịch sử tìm kiếm, ghi 1 dòng mỗi lần phiên tìm kiếm (Topic.search) được gọi.
+    #     Thứ tự mặc định của BaseModel (-created_at) chính là "ngăn xếp mới nhất trước".
+    #     user luôn khớp với topic.user (việc kiểm tra quyền sở hữu đã xong ở
+    #     search_knowledge_nodes, ở đây chỉ lưu lại để truy vấn theo user cho tiện).
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="search_history"
+    )
+    topic = models.ForeignKey(
+        Topic, on_delete=models.CASCADE, related_name="search_history_entries"
+    )
+    query = models.CharField(max_length=255)
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.query}"

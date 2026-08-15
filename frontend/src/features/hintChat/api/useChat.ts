@@ -1,7 +1,39 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from './chatApi'
 import { queryKeys } from '@/shared/api/queryKeys'
-import type { SendMessagePayload } from '@/shared/types'
+import type { SendMessagePayload, Topic, KnowledgeNodeSummary } from '@/shared/types'
+
+// JA: ★学習木はTopicが入れ子(フォルダ)構造。topicId=nullならルート直下、
+//     指定すればそのTopic直下の子Topic・知識ノードを返す(フォルダを開く操作)。
+// VI: ★Cây học tập có cấu trúc Topic lồng nhau (thư mục). topicId=null là gốc,
+//     chỉ định thì trả về Topic con/knowledge node trực thuộc (thao tác mở thư mục).
+export const useTopicFolder = (topicId: string | null) => {
+  return useQuery({
+    queryKey: topicId ? queryKeys.topics.children(topicId) : queryKeys.topics.list(),
+    queryFn: async (): Promise<{ topics: Topic[]; nodes: KnowledgeNodeSummary[] }> => {
+      if (!topicId) {
+        const topics = await chatApi.getRootTopics()
+        return { topics, nodes: [] }
+      }
+      return chatApi.getTopicChildren(topicId)
+    },
+  })
+}
+
+// Hook tạo Topic mới (parentId=null nếu tạo ở gốc, ngược lại tạo lồng dưới parentId)
+export const useCreateTopic = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, parentId }: { name: string; parentId: string | null }) =>
+      chatApi.createTopic(name, parentId),
+    onSuccess: (_, variables) => {
+      const key = variables.parentId
+        ? queryKeys.topics.children(variables.parentId)
+        : queryKeys.topics.list()
+      queryClient.invalidateQueries({ queryKey: key })
+    },
+  })
+}
 
 // Hook lấy danh sách phiên chat
 export const useChatSessions = () => {

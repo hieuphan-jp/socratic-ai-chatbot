@@ -19,7 +19,11 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { chatApi } from '../api/chatApi';
-import type { ChatMessage } from '@/shared/types';
+import { useChatSessions } from '../api/useChat';
+import { TopicFolderPicker } from './TopicFolderPicker';
+import { queryKeys } from '@/shared/api/queryKeys';
+import { Button, Notice, ErrorText } from '@/shared/ui';
+import type { ChatMessage, SendMessagePayload } from '@/shared/types';
 
 interface HintChatViewProps {
   activeSessionId?: string;
@@ -35,9 +39,20 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   const [inputText, setInputText] = useState('');
   const [showTree, setShowTree] = useState(true);
 
-  // React Flow States
+  // React Flow States（思考ツリーのドラッグ操作用）
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // JA: ★knowledge_node未設定のセッションをCOMPLETEする時に、保存先Topicを
+  //     選ぶための状態。既にnodeがあるセッションではこのUIは出さない。
+  // VI: ★State cho việc chọn Topic để lưu, khi COMPLETE một session chưa gắn
+  //     knowledge_node. Session đã có sẵn node thì không hiện UI này.
+  const [showSaveAsNode, setShowSaveAsNode] = useState(false);
+  const [savedNodeTitle, setSavedNodeTitle] = useState<string | null>(null);
+
+  const { data: sessions } = useChatSessions();
+  const currentSession = sessions?.find((s) => String(s.id) === String(currentSessionId));
+  const hasKnowledgeNode = Boolean(currentSession?.knowledge_node);
 
   // JA: 親コンポーネントからのアクティブセッションID変更を監視 / VI: Đồng bộ session ID khi props thay đổi
   useEffect(() => {
@@ -231,14 +246,15 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     setEdges(generatedEdges);
   }, [messages, setNodes, setEdges]);
 
-  // JA: メッセージ送信ミューテーション / VI: Mutation gửi tin nhắn
+  // JA: メッセージ送信ミューテーション（ANSWER/HINT/COMPLETE 共通）
+  // VI: Mutation gửi tin nhắn (dùng chung cho ANSWER/HINT/COMPLETE)
   const sendMessageMutation = useMutation({
     mutationFn: ({
       sessionId,
       payload,
     }: {
       sessionId: string;
-      payload: { message_text: string; action_type: 'ANSWER' | 'CHANGE_METHOD' };
+      payload: SendMessagePayload;
     }) => chatApi.sendMessage(sessionId, payload),
     onSuccess: (data: any) => {
       queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
@@ -247,8 +263,54 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         if (data.ai_message) newData.push(data.ai_message);
         return newData;
       });
+      queryClient.invalidateQueries({ queryKey: ['chatMessages', currentSessionId] });
+      // JA: ★COMPLETEで新しい知識ノードが作られた場合、セッション一覧を
+      //     再取得してhasKnowledgeNodeを更新し、完了メッセージを表示する。
+      // VI: ★Nếu COMPLETE vừa tạo knowledge node mới, tải lại danh sách
+      //     session để cập nhật hasKnowledgeNode và hiện thông báo hoàn tất.
+      if (data.knowledge_node_title) {
+        setSavedNodeTitle(data.knowledge_node_title);
+        setShowSaveAsNode(false);
+        queryClient.invalidateQueries({ queryKey: queryKeys.chat.all });
+      }
     },
   });
+
+  // JA: 「完了」ボタンのハンドラ。既にノードがあるセッションはそのままCOMPLETE、
+  //     ノード未設定ならTopicフォルダ選択パネルを開く。
+  // VI: Hàm xử lý nút "Hoàn thành". Session đã có node thì COMPLETE luôn,
+  //     chưa có node thì mở panel chọn thư mục Topic.
+  const handleCompleteClick = () => {
+    if (!currentSessionId) return;
+    if (hasKnowledgeNode) {
+      // JA: バックエンドは message_text 省略/空文字を許容する(COMPLETEは本文不要)ため、
+      //     以前のようにダミー文字列を送って会話履歴を汚す必要はない。
+      // VI: Backend chấp nhận message_text bỏ trống (COMPLETE không cần nội dung), nên
+      //     không cần gửi chuỗi giả làm bẩn lịch sử hội thoại như trước.
+      sendMessageMutation.mutate({
+        sessionId: currentSessionId,
+        payload: { message_text: '', action_type: 'COMPLETE', understood: true },
+      });
+      return;
+    }
+    setSavedNodeTitle(null);
+    setShowSaveAsNode(true);
+  };
+
+  // JA: フォルダピッカーで保存先Topicが確定した時のハンドラ。
+  // VI: Hàm xử lý khi đã chốt Topic để lưu qua bộ chọn thư mục.
+  const handleSaveToTopic = (topicId: string) => {
+    if (!currentSessionId) return;
+    sendMessageMutation.mutate({
+      sessionId: currentSessionId,
+      payload: {
+        message_text: '',
+        action_type: 'COMPLETE',
+        understood: true,
+        topic_id: topicId,
+      },
+    });
+  };
 
   // JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
   const handleSendMessage = async (text: string) => {
@@ -310,7 +372,56 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         </button>
       </div>
 
-      {/* Container chứa Cột Chat & Cột Sơ đồ tư duy */}
+      {/* JA: ★学んだ内容を知識ノードとして保存する導線 / VI: ★Luồng lưu nội dung đã học thành knowledge node */}
+      {currentSessionId && (
+        <div style={{ marginBottom: '12px' }}>
+          {!showSaveAsNode && (
+            <Button
+              type="button"
+              onClick={handleCompleteClick}
+              disabled={sendMessageMutation.isPending}
+            >
+              {hasKnowledgeNode
+                ? '復習を完了する / Hoàn thành ôn tập'
+                : '学習を完了して知識ノードとして保存 / Hoàn thành và lưu thành knowledge node'}
+            </Button>
+          )}
+
+          {showSaveAsNode && (
+            <div
+              style={{
+                marginTop: '8px',
+                padding: '12px 14px',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+              }}
+            >
+              <Notice>
+                学習木のどのフォルダに保存するか選んでください（フォルダを開いて絞り込めます）/
+                Chọn lưu vào thư mục nào trong cây học tập (có thể mở thư mục để đi sâu hơn)
+              </Notice>
+              <div style={{ marginTop: '8px' }}>
+                <TopicFolderPicker
+                  onSelect={handleSaveToTopic}
+                  onCancel={() => setShowSaveAsNode(false)}
+                />
+              </div>
+              {sendMessageMutation.isError && (
+                <ErrorText>{(sendMessageMutation.error as Error).message}</ErrorText>
+              )}
+            </div>
+          )}
+
+          {savedNodeTitle && (
+            <Notice>
+              知識ノード「{savedNodeTitle}」として保存しました / Đã lưu thành knowledge node "
+              {savedNodeTitle}"
+            </Notice>
+          )}
+        </div>
+      )}
+
+      {/* JA: チャット領域と思考ツリー領域のコンテナ / VI: Container chứa Cột Chat & Cột Sơ đồ tư duy */}
       <div style={{ display: 'flex', gap: '16px', width: '100%', marginBottom: '16px' }}>
         
         {/* CỘT TRÁI: Khung hiển thị chat */}
