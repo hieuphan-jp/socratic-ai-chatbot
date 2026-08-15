@@ -20,9 +20,18 @@ from .fake import FakeProvider
 #     → Chỉ import GeminiProvider bên trong get_llm(), khi thực sự cần dùng
 #        (lazy import), để cô lập lỗi thiếu package vào đúng nhánh gemini.
 
-# Load biến môi trường từ file .env tại thư mục gốc backend
+# JA: backend直下の .env を読み込む。★override=False にすること。
+#     True にすると .env がシェルの環境変数を上書きするため、
+#     `AI_PROVIDER=fake python manage.py test` としてもテストが本物のGemini APIを
+#     呼んでしまい、無料枠を食い潰す(実際に発生した)。
+#     明示的に指定した環境変数が常に勝つ、という一般的な優先順位に揃える。
+# VI: Nạp .env ở thư mục backend. ★Phải để override=False.
+#     Nếu để True thì .env sẽ ghi đè biến môi trường của shell, khiến
+#     `AI_PROVIDER=fake python manage.py test` vẫn gọi API Gemini thật và
+#     đốt hết hạn mức miễn phí (đã xảy ra thực tế).
+#     Giữ đúng thứ tự ưu tiên thông thường: biến môi trường chỉ định tường minh luôn thắng.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
 
 @lru_cache(maxsize=1)

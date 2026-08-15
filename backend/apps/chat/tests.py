@@ -14,7 +14,7 @@ VI: Kiểm tra tính năng đoán nhánh (xác nhận node cha) và luồng hoà
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.chat import branching, services
+from apps.chat import branching, services, steps
 from apps.chat.models import Attempt, ChatMessage, ChatSession
 from apps.common.exceptions import NotFound, ValidationError
 from apps.reviews.models import ReviewLog, ReviewSchedule
@@ -225,3 +225,96 @@ class BigramBranchingTestCase(TestCase):
         self.assertIsNone(
             branching.suggest_parent(new_text="", candidates=[("a", "微分"), ("b", "積分")])
         )
+
+
+class StepClassificationTestCase(TestCase):
+    """
+    JA: 相槌の足切りと、幹/枝の番号採番(1, 2, 3, 3-1)の検証。どちらもAIを使わない純ロジック。
+    VI: Kiểm tra việc lọc câu đệm và đánh số thân/nhánh (1, 2, 3, 3-1). Đều là logic thuần, không dùng AI.
+    """
+
+    def test_aizuchi_is_trivial(self):
+        for text in ["そうですね", "なるほど", "はい", "OK", "ありがとうございます", "vâng"]:
+            self.assertTrue(steps.is_trivial_message(text), text)
+
+    def test_real_question_is_not_trivial(self):
+        for text in [
+            "HTMLの役割について教えてください",
+            "なぜ判別式が必要なの？",
+            "そうですね、では次にCSSについて教えて",
+        ]:
+            self.assertFalse(steps.is_trivial_message(text), text)
+
+    def test_short_question_with_question_mark_is_kept(self):
+        # JA: 短くても疑問符があれば質問として扱う。
+        # VI: Ngắn nhưng có dấu hỏi thì vẫn coi là câu hỏi.
+        self.assertFalse(steps.is_trivial_message("なぜ?"))
+
+    def test_step_labels_number_trunk_and_branches(self):
+        user = User.objects.create_user(username="labels", password="password")
+        session = ChatSession.objects.create(user=user, title="t")
+        Kind = ChatMessage.StepKind
+
+        s1 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="1", step_kind=Kind.TRUNK
+        )
+        s2 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="2", step_kind=Kind.TRUNK
+        )
+        b1 = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="2の枝",
+            step_kind=Kind.BRANCH,
+            parent_message=s2,
+        )
+        b2 = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="2の枝その2",
+            step_kind=Kind.BRANCH,
+            parent_message=s2,
+        )
+        nested = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="枝の枝",
+            step_kind=Kind.BRANCH,
+            parent_message=b1,
+        )
+        s3 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="3", step_kind=Kind.TRUNK
+        )
+
+        labels = steps.build_step_labels([s1, s2, b1, b2, nested, s3])
+        self.assertEqual(labels[s1.id], "1")
+        self.assertEqual(labels[s2.id], "2")
+        self.assertEqual(labels[b1.id], "2-1")
+        self.assertEqual(labels[b2.id], "2-2")
+        self.assertEqual(labels[nested.id], "2-1-1")
+        # JA: ★枝が挟まっても幹の番号は連番のまま(以前はここが時系列の通し番号でズレていた)。
+        # VI: ★Dù có nhánh xen giữa, số của thân vẫn liên tiếp (trước đây đánh số theo thời gian nên lệch).
+        self.assertEqual(labels[s3.id], "3")
+
+    def test_graph_excludes_non_step_messages(self):
+        user = User.objects.create_user(username="graph", password="password")
+        session = ChatSession.objects.create(user=user, title="t")
+        trunk = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="HTMLとは",
+            step_kind=ChatMessage.StepKind.TRUNK,
+            step_title="HTMLとは",
+        )
+        # JA: 相槌とAIの返答は木に出ない。 VI: Câu đệm và câu trả lời AI không lên cây.
+        ChatMessage.objects.create(session=session, sender="USER", message_text="そうですね")
+        ChatMessage.objects.create(session=session, sender="AI", message_text="いい質問です")
+
+        graph = services.get_session_graph_data(session=session)
+        self.assertEqual([n["id"] for n in graph["nodes"]], [str(trunk.id)])
+        self.assertEqual(graph["nodes"][0]["data"]["step_label"], "1")
+        self.assertEqual(graph["nodes"][0]["data"]["title"], "HTMLとは")
+
+    def test_fallback_title_strips_question_tail(self):
+        self.assertEqual(steps.fallback_title("HTMLの役割について教えてください"), "HTMLの役割")
+        self.assertEqual(steps.fallback_title("二次方程式とは何ですか？"), "二次方程式")
