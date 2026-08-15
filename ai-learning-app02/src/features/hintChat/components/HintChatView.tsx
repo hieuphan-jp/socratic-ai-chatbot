@@ -1,11 +1,11 @@
 /**
  * features/hintChat/components/HintChatView.tsx
  *
- * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント (自動スクロール・即時反映対応)
- * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy (Tự động cuộn & Cập nhật tức thì)
+ * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント (Clean Code & Tailwind CSS版)
+ * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy (Đã refactor sạch & Dùng Tailwind)
  */
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { chatApi } from '../api/chatApi'
@@ -27,21 +27,17 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
 }) => {
   const queryClient = useQueryClient()
 
-  // JA: セッションID管理 / VI: Quản lý Session ID
+  // Session ID quản lý nội bộ khi không truyền prop
   const [internalSessionId, setInternalSessionId] = useState<string | undefined>(undefined)
   const currentSessionId = propSessionId || internalSessionId
 
-  // JA: 思考ツリーの表示切り替え / VI: Toggle ẩn/hiện sơ đồ tư duy
+  // Toggle ẩn/hiện sơ đồ tư duy (Mặc định ẩn hoặc hiện tùy bạn chọn, ở đây để true)
   const [showTree, setShowTree] = useState(true)
 
-  // JA: メッセージ一覧の末尾要素への参照 (自動スクロール用)
-  // VI: Ref đến cuối danh sách tin nhắn (Dùng cho auto-scroll)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  // JA: メッセージ送信フック / VI: Hook gửi tin nhắn
+  // Hook gửi tin nhắn
   const sendMessageMutation = useSendMessage(currentSessionId)
 
-  // JA: 新規セッション作成ミューテーション / VI: Mutation tạo phiên chat mới
+  // Mutation tạo phiên chat mới
   const createSessionMutation = useMutation({
     mutationFn: (title?: string) => chatApi.createSession(title || 'Hint Chat Session'),
     onSuccess: (newSession) => {
@@ -54,7 +50,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     },
   })
 
-  // 1. JA: メッセージ一覧取得 / VI: Fetch danh sách tin nhắn
+  // 1. Fetch danh sách tin nhắn của session hiện tại
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery<ChatMessage[]>({
     queryKey: ['chatMessages', currentSessionId],
     queryFn: async () => {
@@ -66,13 +62,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     staleTime: 1000 * 60 * 5,
   })
 
-  // JA: メッセージ追加時や送信中に自動スクロール
-  // VI: Tự động cuộn xuống cuối khi có tin nhắn mới hoặc đang chờ AI trả lời
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, sendMessageMutation.isPending])
-
-  // 2. JA: 親ノード確認ミューテーション / VI: Mutation xác nhận node cha (rẽ nhánh)
+  // 2. Mutation xác nhận node cha (rẽ nhánh)
   const confirmParentMutation = useMutation({
     mutationFn: ({
       sessionId,
@@ -101,7 +91,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     },
   })
 
-  // 3. JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
+  // 3. Hàm xử lý gửi tin nhắn
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return
 
@@ -153,7 +143,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       {/* Container chính: Cột Chat & Cột Sơ đồ tư duy */}
       <div className="mb-4 flex w-full gap-4">
         
-        {/* CỘT TRÁI: Khung hiển thị tin nhắn */}
+        {/* CỘT TRÁI: Khung hiển thị tin nhắn (Tự co giãn Full 100% khi ẩn Tree) */}
         <div className={`flex h-[480px] flex-col rounded-2xl border border-gray-200 bg-white p-4 box-border overflow-y-auto transition-all ${
           showTree ? 'flex-[1.2]' : 'w-full flex-1'
         }`}>
@@ -182,21 +172,17 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                 />
               ))}
 
-            {/* Bong bóng AI đang suy nghĩ */}
             {sendMessageMutation.isPending && (
               <div className="flex justify-start">
-                <div className="rounded-lg bg-gray-100 px-3 py-2 text-xs italic text-gray-400 animate-pulse">
-                  AI thinking... / AIが考え中...
+                <div className="rounded-lg bg-gray-100 px-3 py-2 text-xs italic text-gray-400">
+                  Thinking... / 考え中...
                 </div>
               </div>
             )}
-
-            {/* Anchor element cho Auto-scroll */}
-            <div ref={messagesEndRef} />
           </div>
         </div>
 
-        {/* CỘT PHẢI: Sơ đồ tư duy */}
+        {/* CỘT PHẢI: Sơ đồ tư duy (Chỉ hiển thị khi showTree = true) */}
         {showTree && (
           <div className="flex-1 transition-all">
             <ThinkingTreePanel messages={messages} />
