@@ -3,19 +3,32 @@ apps/topics/tests.py
 
 JA: 検索セッション機能(search_session/API_CONTRACT_2.md)のエンドポイントを検証する。
     ・ルートTopic一覧の絞り込み(?parent=null)とhas_children
-    ・ドリルダウン(children)が子Topic/常設KnowledgeNodeのみ返すこと
-    ・再帰検索(search)がAI生成の類題を除外し、配下全体を対象にすること
+    ・ドリルダウン(children)が子TopicとKnowledgeNodeを返すこと
+    ・再帰検索(search)が配下全体を対象にすること
     ・所有者以外からは404になること
+    ・他アプリ向けの窓口(get_owned_topic / get_owned_knowledge_node)の所有権チェック
+    【修正 2026-08-15】origin_node フィールド削除に追従できておらず、setUp が
+    TypeError で落ちて全テストがエラーになっていたため、AI生成の類題ノードを
+    前提とした fixture と表明を削除した。
 VI: Kiểm tra các endpoint của tính năng phiên tìm kiếm (search_session/API_CONTRACT_2.md).
     - Lọc danh sách Topic gốc (?parent=null) và has_children
-    - Duyệt sâu dần (children) chỉ trả về Topic con / KnowledgeNode cố định
-    - Tìm kiếm đệ quy (search) loại trừ node類題 do AI sinh, tìm trong toàn bộ phạm vi con cháu
+    - Duyệt sâu dần (children) trả về Topic con và KnowledgeNode
+    - Tìm kiếm đệ quy (search) quét toàn bộ phạm vi con cháu
     - Không phải chủ sở hữu thì nhận 404
+    - Kiểm tra quyền sở hữu ở cửa ngõ cho app khác (get_owned_topic / get_owned_knowledge_node)
+    【Sửa 2026-08-15】Do chưa cập nhật theo việc xóa field origin_node, setUp bị
+    TypeError khiến toàn bộ test lỗi; đã xóa fixture và assertion dựa trên node
+    類題 do AI sinh.
 """
+
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from apps.common.exceptions import NotFound
+
+from . import services
 from .models import KnowledgeNode, Topic
 
 User = get_user_model()
@@ -40,11 +53,6 @@ class SearchSessionTests(TestCase):
         self.n2 = KnowledgeNode.objects.create(
             topic=self.algebra, title="二次方程式", content="判別式の使い方"
         )
-        # JA: AI生成の使い捨て類題。検索セッションには一切出てこないはず。
-        # VI: Node類題 dùng một lần do AI sinh. Không được xuất hiện ở phiên tìm kiếm.
-        KnowledgeNode.objects.create(
-            topic=self.algebra, title="類題", content="dummy", origin_node=self.n1
-        )
 
     def test_root_topics_only_with_parent_null(self):
         resp = self.client.get("/api/topics/?parent=null")
@@ -62,7 +70,7 @@ class SearchSessionTests(TestCase):
         )
         self.assertFalse(geometry_entry["has_children"])
 
-    def test_children_returns_child_topics_and_permanent_nodes_only(self):
+    def test_children_returns_child_topics_and_nodes(self):
         resp = self.client.get(f"/api/topics/{self.algebra.id}/children/")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -70,7 +78,7 @@ class SearchSessionTests(TestCase):
         node_titles = {n["title"] for n in data["nodes"]}
         self.assertEqual(node_titles, {"一次方程式の基礎", "二次方程式"})
 
-    def test_search_finds_match_recursively_and_excludes_derived_nodes(self):
+    def test_search_finds_match_recursively(self):
         resp = self.client.get(f"/api/topics/{self.math.id}/search/?q=一次")
         self.assertEqual(resp.status_code, 200)
         titles = [n["title"] for n in resp.json()]
@@ -171,3 +179,38 @@ class SearchSessionTests(TestCase):
         resp = self.client.get("/api/search-history/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), [])
+
+
+class OwnershipGatewayTests(TestCase):
+    """
+    JA: 他アプリ(apps/chat 等)がTopic/KnowledgeNodeを取りに来るときの窓口が、
+        所有者チェックを必ず行うことを保証する。ここが緩いと、他人のノードに
+        自分のチャットセッションを紐付けられてしまう。
+    VI: Bảo đảm cửa ngõ cho app khác (apps/chat...) lấy Topic/KnowledgeNode luôn
+        kiểm tra chủ sở hữu. Nếu chỗ này lỏng, user có thể gắn phiên chat của
+        mình vào node của người khác.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="owner2", password="pass12345")
+        self.other = User.objects.create_user(username="stranger2", password="pass12345")
+        self.topic = Topic.objects.create(user=self.user, name="数学", position=0)
+        self.node = KnowledgeNode.objects.create(
+            topic=self.topic, title="一次方程式", content="x + 3 = 7"
+        )
+
+    def test_get_owned_knowledge_node_returns_own_node(self):
+        node = services.get_owned_knowledge_node(user=self.user, node_id=self.node.id)
+        self.assertEqual(node.id, self.node.id)
+
+    def test_get_owned_knowledge_node_rejects_other_users_node(self):
+        with self.assertRaises(NotFound):
+            services.get_owned_knowledge_node(user=self.other, node_id=self.node.id)
+
+    def test_get_owned_knowledge_node_rejects_unknown_id(self):
+        with self.assertRaises(NotFound):
+            services.get_owned_knowledge_node(user=self.user, node_id=uuid.uuid4())
+
+    def test_get_owned_topic_rejects_other_users_topic(self):
+        with self.assertRaises(NotFound):
+            services.get_owned_topic(user=self.other, topic_id=self.topic.id)

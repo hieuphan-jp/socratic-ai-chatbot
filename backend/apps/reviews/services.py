@@ -15,17 +15,23 @@ from .models import ReviewSchedule
 MIN_EASINESS_FACTOR = 1.3
 PASSING_RATING = 3
 
-RATING_UNDERSTOOD = 5
-RATING_NOT_UNDERSTOOD = 1
+# JA: 【設計変更 2026-08-15】理解度の自己申告(understood)は廃止した。
+#     AIは理解の確認をしない方針であり、復習の成否は「予定日に自分でノードを
+#     見に行って完了ボタンを押したかどうか」だけで判断する。よって完了は常に
+#     この固定評価で記録する(将来もっと柔軟な評価に戻せるよう、ReviewLogの
+#     performance_rating フィールド自体は残してある)。
+# VI: 【Thay đổi thiết kế 2026-08-15】Đã bỏ việc user tự khai mức hiểu
+#     (understood). AI không hỏi kiểm tra mức hiểu; việc ôn tập thành công hay
+#     không chỉ căn cứ vào "user có tự mở lại node đúng hạn và bấm nút hoàn
+#     thành hay không". Vì vậy mọi lần hoàn thành đều ghi bằng điểm cố định này
+#     (vẫn giữ field performance_rating của ReviewLog để sau này quay lại cách
+#     đánh giá linh hoạt hơn).
+COMPLETION_RATING = 5
 
 
 def get_or_create_schedule(node: KnowledgeNode) -> ReviewSchedule:
     schedule, _created = ReviewSchedule.objects.get_or_create(node=node)
     return schedule
-
-
-def rating_from_understood(understood: bool) -> int:
-    return RATING_UNDERSTOOD if understood else RATING_NOT_UNDERSTOOD
 
 
 def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
@@ -70,7 +76,17 @@ def apply_sm2(node: KnowledgeNode, performance_rating: int) -> ReviewSchedule:
     return schedule
 
 
-def record_review_result(attempt, understood: bool) -> ReviewSchedule:
+def record_review_result(attempt, understood: bool | None = None) -> ReviewSchedule:
+    """
+    JA: 1回分の学習/復習(Attempt)が完了したことを記録し、次回の復習日を更新する。
+        引数 understood は廃止済み(COMPLETION_RATING 参照)。呼び出し側(apps/chat)
+        がまだ渡してくるため受け取るだけ受け取り、無視する。チャット機能側の
+        改修が入ったら引数ごと削除してよい。
+    VI: Ghi nhận một lượt học/ôn tập (Attempt) đã hoàn thành và cập nhật ngày ôn
+        kế tiếp. Tham số understood đã bỏ (xem COMPLETION_RATING). Vì bên gọi
+        (apps/chat) vẫn còn truyền vào nên chỉ nhận rồi bỏ qua. Khi phía tính năng
+        Chat được sửa thì có thể xóa hẳn tham số này.
+    """
     from .models import ReviewLog
 
     node = attempt.chat_session.knowledge_node
@@ -80,7 +96,7 @@ def record_review_result(attempt, understood: bool) -> ReviewSchedule:
             "Session này chưa gắn với KnowledgeNode nào"
         )
 
-    performance_rating = rating_from_understood(understood)
+    performance_rating = COMPLETION_RATING
 
     response_time_seconds = None
     if attempt.completed_at and attempt.created_at:

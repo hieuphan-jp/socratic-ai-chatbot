@@ -25,6 +25,14 @@ class ReviewScheduleViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"])
     def due(self, request):
-        queryset = self.get_queryset().filter(next_review_at__lte=timezone.now())
+        # JA: 予定日が古い(=放置が長い)ものから並べる。ユーザーが上から順に
+        #     片付ければ、木の緑が戻るのが早い。
+        # VI: Sắp xếp từ hạn cũ nhất (bỏ quên lâu nhất). User xử lý lần lượt từ trên
+        #     xuống thì cây xanh lại nhanh hơn.
+        queryset = (
+            self.get_queryset()
+            .filter(next_review_at__lte=timezone.now())
+            .order_by("next_review_at")
+        )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)

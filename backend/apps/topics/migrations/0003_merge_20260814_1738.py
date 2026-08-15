@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('topics', '0002_remove_knowledgenode_origin_node'),
-        ('topics', '0002_searchhistory'),
+        ("topics", "0002_remove_knowledgenode_origin_node"),
+        ("topics", "0002_searchhistory"),
     ]
 
-    operations = [
-    ]
+    operations = []
