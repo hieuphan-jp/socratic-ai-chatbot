@@ -1,8 +1,8 @@
 /**
  * features/hintChat/components/ChatMessageItem.tsx
  *
- * JA: メッセージアイテム表示コンポーネント (日英対応・左揃え修正版)
- * VI: Component hiển thị từng tin nhắn chat (Đã sửa lỗi căn lề trái và loại bỏ any)
+ * JA: メッセージアイテム表示コンポーネント (日英対応)
+ * VI: Component hiển thị từng tin nhắn chat (Hỗ trợ Việt - Nhật)
  */
 
 import React from 'react'
@@ -45,15 +45,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
   const immediatePrevUserMsg =
     userMsgsBefore.length > 0 ? userMsgsBefore[userMsgsBefore.length - 1] : null
 
-  // Kiểm tra gợi ý rẽ nhánh từ AI (Trích xuất Type-safe)
+  // Kiểm tra gợi ý rẽ nhánh từ AI
   const rawSuggestedParent = message.suggested_parent_id
-  let suggestedParentIdStr = ''
-
-  if (typeof rawSuggestedParent === 'object' && rawSuggestedParent !== null && 'id' in rawSuggestedParent) {
-    suggestedParentIdStr = String((rawSuggestedParent as { id: string | number }).id).toLowerCase()
-  } else if (typeof rawSuggestedParent === 'string' || typeof rawSuggestedParent === 'number') {
-    suggestedParentIdStr = String(rawSuggestedParent).toLowerCase()
-  }
+  const suggestedParentIdStr =
+    typeof rawSuggestedParent === 'object' && rawSuggestedParent !== null
+      ? String((rawSuggestedParent as { id: string }).id).toLowerCase()
+      : String(rawSuggestedParent || '').toLowerCase()
 
   const needsBranchConfirm =
     isUser &&
@@ -77,32 +74,31 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
   }
 
   return (
-    <div className={`flex w-full flex-col ${isUser ? 'items-end' : 'items-start'} mb-3 text-left`}>
-      {/* Khung chứa nội dung tin nhắn: User bên phải, AI/System lề trái */}
-      <div
-        onCopy={handleCopy}
-        className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap text-left break-words ${
-          isUser
-            ? 'bg-blue-600 text-white rounded-br-none self-end select-text'
-            : 'border border-gray-200 bg-gray-100 text-gray-800 rounded-bl-none self-start select-none'
-        }`}
-      >
-        {textContent}
+    <>
+      <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div
+          onCopy={handleCopy}
+          className={`max-w-[85%] rounded-lg px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap select-text ${
+            isUser
+              ? 'bg-blue-600 text-white'
+              : 'border border-gray-200 bg-gray-100 text-gray-800'
+          }`}
+        >
+          {textContent}
+        </div>
       </div>
 
       {/* Banner gợi ý rẽ nhánh nếu có */}
       {needsBranchConfirm && currentSessionId && (
-        <div className="w-full max-w-[85%] self-end mt-1">
-          <BranchConfirmBanner
-            message={message}
-            suggestedParentMsg={suggestedParentMsg}
-            suggestedParentIdStr={suggestedParentIdStr}
-            isPending={confirmParentMutation.isPending}
-            onConfirm={confirmParentMutation.mutate}
-            currentSessionId={currentSessionId}
-          />
-        </div>
+        <BranchConfirmBanner
+          message={message}
+          suggestedParentMsg={suggestedParentMsg}
+          suggestedParentIdStr={suggestedParentIdStr}
+          isPending={confirmParentMutation.isPending}
+          onConfirm={confirmParentMutation.mutate}
+          currentSessionId={currentSessionId}
+        />
       )}
-    </div>
+    </>
   )
 }
