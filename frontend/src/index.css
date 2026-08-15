@@ -1,0 +1,15 @@
+/**
+ * index.css
+ *
+ * JA: Tailwind のユーティリティのみを読み込む。preflight(全要素の全体リセット)は
+ *     あえて外している。既存の未移行画面(HomePage・LoginPage・HintChatPage等)は
+ *     インラインstyleで組んであり、Tailwind未導入を前提にしているため、
+ *     preflightを入れると意図せずそちら側の見た目が変わってしまう。
+ *     機能ごとに少しずつTailwindへ移行する間は、この形を維持する。
+ * VI: Chỉ nạp phần utilities của Tailwind. Cố tình tắt preflight (reset toàn bộ)
+ *     vì các màn hình chưa chuyển sang Tailwind (HomePage, LoginPage, HintChatPage...)
+ *     đang dựng bằng inline style, giả định chưa có Tailwind. Bật preflight sẽ vô tình
+ *     đổi giao diện những màn đó. Giữ nguyên cách này trong lúc chuyển dần từng tính năng.
+ */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);

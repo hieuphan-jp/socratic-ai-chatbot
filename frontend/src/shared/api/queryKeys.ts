@@ -27,6 +27,13 @@ export const queryKeys = {
   learningTree: {
     all: ['learningTree'] as const,
     list: () => [...queryKeys.learningTree.all, 'list'] as const,
+    node: (nodeId: string) => [...queryKeys.learningTree.all, 'node', nodeId] as const,
+  },
+  // JA: 復習スケジュール(学習木の葉を塗るための定着度・復習タイミング)のクエリキー。
+  // VI: Key cho lịch ôn tập (độ ghi nhớ, thời điểm ôn tập để tô lá của cây học tập).
+  reviews: {
+    all: ['reviews'] as const,
+    schedules: () => [...queryKeys.reviews.all, 'schedules'] as const,
   },
   // JA: Topic(学習木のカテゴリ)のクエリキー。list()はルート直下、children(id)は
   //     指定Topic直下(フォルダのドリルダウン)。

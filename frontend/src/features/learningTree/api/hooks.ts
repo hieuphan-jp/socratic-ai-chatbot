@@ -8,11 +8,23 @@ import { useQuery } from '@tanstack/react-query'
 
 import { api } from '@/shared/api/client'
 import { queryKeys } from '@/shared/api/queryKeys'
-import type { TreeNode } from '@/shared/types'
+import type { KnowledgeNodeDetail, TreeNode } from '@/shared/types'
 
 export function useLearningTree() {
   return useQuery({
     queryKey: queryKeys.learningTree.list(),
     queryFn: () => api.get<TreeNode[]>('/learning-tree/'),
+  })
+}
+
+// JA: 葉(知識ノード)をクリックした時に、本文を含む詳細を取得する。
+//     nodeId が空の間は叩かない(何も選ばれていない状態)。
+// VI: Lấy chi tiết (kèm nội dung) khi bấm vào lá (knowledge node).
+//     Không gọi khi nodeId rỗng (chưa chọn gì).
+export function useKnowledgeNodeDetail(nodeId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.learningTree.node(nodeId ?? ''),
+    queryFn: () => api.get<KnowledgeNodeDetail>(`/knowledge-nodes/${nodeId}/`),
+    enabled: !!nodeId,
   })
 }

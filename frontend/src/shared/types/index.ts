@@ -82,6 +82,41 @@ export type KnowledgeNodeSummary = {
   topic: string
 }
 
+// JA: 知識ノードの詳細(本文つき)。KnowledgeNodeDetailSerializer と対応。
+// VI: Chi tiết knowledge node (có nội dung). Tương ứng KnowledgeNodeDetailSerializer.
+export type KnowledgeNodeDetail = {
+  id: string
+  title: string
+  content: string
+  topic: string
+  topic_name: string
+}
+
+// JA: 復習スケジュール。ReviewScheduleSerializer と対応。学習木の葉を塗るための
+//     材料(色そのものはフロントが決める。CONVENTIONS.md §12 参照)。
+//     mastery_level: 緑の濃さ(0〜mastery_max_level、復習回数が増えるほど濃くなる)。
+//     is_due: 復習タイミングが来たか(緑の濃さとは別軸、バッジ等に使う)。
+//     ReviewSchedule が無い(=このAPIに出てこない)ノードは「未学習」として扱う。
+// VI: Lịch ôn tập. Tương ứng ReviewScheduleSerializer. Nguyên liệu để tô màu lá của
+//     cây học tập (màu cụ thể do frontend quyết, xem CONVENTIONS.md §12).
+//     mastery_level: độ đậm xanh (0 đến mastery_max_level, ôn nhiều thì đậm hơn).
+//     is_due: đã tới hạn ôn tập chưa (trục riêng, tách khỏi độ đậm màu, dùng cho badge).
+//     Node không có ReviewSchedule (không xuất hiện ở API này) thì coi là "chưa học".
+export type ReviewSchedule = {
+  id: string
+  node_id: string
+  node_title: string
+  topic_id: string
+  interval_days: number
+  next_review_at: string
+  learned_count: number
+  mastery_level: number
+  mastery_max_level: number
+  is_due: boolean
+  days_overdue: number
+  chat_session_id: string | null
+}
+
 export type StepNode = {
   id: string
   step_number: number
