@@ -8,7 +8,12 @@ from apps.common.permissions import IsOwner
 
 from . import services
 from .models import ChatSession
-from .serializers import ChatMessageSerializer, ChatSessionSerializer, SendMessageInputSerializer
+from .serializers import (
+    ChatMessageSerializer,
+    ChatSessionSerializer,
+    ConfirmParentInputSerializer,
+    SendMessageInputSerializer,
+)
 
 
 class ChatSessionViewSet(
@@ -59,11 +64,32 @@ class ChatSessionViewSet(
                 #     「知識ノードとして保存しました」と表示するために返す。
                 # VI: ★Trả về để frontend hiển thị "đã lưu thành knowledge node"
                 #     khi node vừa được tạo mới trong request này.
-                "knowledge_node": str(session.knowledge_node_id) if session.knowledge_node_id else None,
-                "knowledge_node_title": session.knowledge_node.title if session.knowledge_node_id else None,
+                "knowledge_node": str(session.knowledge_node_id)
+                if session.knowledge_node_id
+                else None,
+                "knowledge_node_title": session.knowledge_node.title
+                if session.knowledge_node_id
+                else None,
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="confirm-parent")
+    def confirm_parent(self, request, pk=None):
+        """
+        JA: 分岐確認UIからの「この過去ノードに繋げる／今のままにする」を確定する。
+        VI: Chốt lựa chọn "nối vào node cũ này / giữ nguyên" từ UI xác nhận rẽ nhánh.
+        """
+        session = self.get_object()
+        input_serializer = ConfirmParentInputSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        message = services.confirm_message_parent(
+            session=session,
+            message_id=input_serializer.validated_data["message_id"],
+            parent_message_id=input_serializer.validated_data.get("parent_message_id"),
+        )
+        return Response(ChatMessageSerializer(message).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="messages")
     def messages(self, request, pk=None):

@@ -1,10 +1,10 @@
 /**
  * features/hintChat/components/HintChatView.tsx
  *
- * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント。分岐推定の確認機能対応。
- * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy. Hỗ trợ xác nhận rẽ nhánh chính xác.
+ * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント。分岐推定の確認機能、ドラッグ＆ドロップ、コピー制限対応。
+ * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy. Hỗ trợ xác nhận rẽ nhánh, kéo thả Node và chặn copy tin nhắn AI.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ReactFlow,
@@ -13,6 +13,8 @@ import {
   Node,
   Edge,
   BackgroundVariant,
+  useNodesState,
+  useEdgesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -36,6 +38,10 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(propSessionId);
   const [inputText, setInputText] = useState('');
   const [showTree, setShowTree] = useState(true);
+
+  // React Flow States（思考ツリーのドラッグ操作用）
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   // JA: ★knowledge_node未設定のセッションをCOMPLETEする時に、保存先Topicを
   //     選ぶための状態。既にnodeがあるセッションではこのUIは出さない。
@@ -77,10 +83,10 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       return Array.isArray(res) ? res : (res as any).results || [];
     },
     enabled: !!currentSessionId,
+    staleTime: 1000 * 60 * 5, // JA: キャッシュを5分間保持し、自動再取得による状態リセットを防止 / VI: Tránh auto refetch ngầm đè state
   });
 
-  // JA: 2. 分岐確定ミューテーション (invalidateQueries を除去し、State/Cache を固定)
-  // VI: Mutation xác nhận node cha - Giữ nguyên Cache vừa cập nhật, tránh bị API GET fetch đè lại dữ liệu cũ
+  // JA: 2. 分岐確定ミューテーション / VI: Mutation xác nhận node cha (rẽ nhánh)
   const confirmParentMutation = useMutation({
     mutationFn: ({
       sessionId,
@@ -92,14 +98,16 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       parentMessageId: string | null;
     }) => chatApi.confirmParent(sessionId, { message_id: messageId, parent_message_id: parentMessageId }),
     onSuccess: (_updatedMsg: any, variables) => {
-      // Cập nhật trực tiếp cache local để cố định cấu trúc nhánh mới mà không bị fetch lại làm giật
+      // JA: キャッシュの parent_message と parent_confirmed を直接更新
+      // VI: Cập nhật trực tiếp cache local để cố định cấu trúc rẽ nhánh vĩnh viễn
       queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
         if (!oldData) return [];
         return oldData.map((m) => {
-          if (String(m.id) === String(variables.messageId)) {
+          if (String(m.id).toLowerCase() === String(variables.messageId).toLowerCase()) {
             return {
               ...m,
               parent_message: variables.parentMessageId as any,
+              parent_message_id: variables.parentMessageId,
               parent_confirmed: true,
             };
           }
@@ -109,25 +117,23 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     },
   });
 
-  // JA: 3. React Flow用のノードとエッジを生成（思考ツリー・分岐構造対応）
-  // VI: 3. Tạo Node & Edge cho Sơ đồ tư duy (React Flow) - Xử lý bóc tách ID parent_message chính xác
-  const { nodes, edges } = useMemo(() => {
+  // JA: 3. メッセージ変更時に React Flow の Node と Edge を自動計算してセット
+  // VI: Tự động tính toán vị trí Node và dây nối Edge khi có danh sách tin nhắn mới
+  useEffect(() => {
     const generatedNodes: Node[] = [];
     const generatedEdges: Edge[] = [];
 
-    // JA: ユーザーの質問メッセージを抽出 / VI: Lọc tin nhắn USER
     const userMsgs = messages.filter((msg: ChatMessage) => {
       const sender = (msg.sender || msg.node_type || (msg as any).sender_type || '').toUpperCase();
       return sender === 'USER' || sender === 'HUMAN';
     });
 
     if (userMsgs.length === 0) {
-      // Demo node khi chưa có tin nhắn
       generatedNodes.push(
         {
           id: 'step-1',
           data: { label: 'ステップ1: 問題の分析 / Bước 1: Phân tích bài toán' },
-          position: { x: 10, y: 30 },
+          position: { x: 50, y: 20 },
           style: {
             border: '1px solid #d1d5db',
             borderRadius: '6px',
@@ -142,7 +148,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         {
           id: 'step-2',
           data: { label: 'ステップ2: 解法の選択 / Bước 2: Chọn phương pháp giải' },
-          position: { x: 130, y: 130 },
+          position: { x: 50, y: 120 },
           style: {
             border: '1px solid #d1d5db',
             borderRadius: '6px',
@@ -164,36 +170,36 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
         style: { stroke: '#3b82f6', strokeDasharray: '4', strokeWidth: 1.5 },
       });
     } else {
-      // Map lưu vị trí index của các node USER để tra cứu vị trí
       const nodeIndexMap: Record<string, number> = {};
       userMsgs.forEach((msg, idx) => {
-        if (msg.id) nodeIndexMap[String(msg.id)] = idx;
+        if (msg.id) nodeIndexMap[String(msg.id).toLowerCase()] = idx;
       });
 
       userMsgs.forEach((msg: ChatMessage, idx: number) => {
         const text = msg.message_text || '';
         const stepNum = idx + 1;
-        const nodeId = String(msg.id || `node-${stepNum}`);
+        const nodeId = String(msg.id || `node-${stepNum}`).toLowerCase();
 
-        // Bóc tách parentId chuẩn kể cả khi parent_message là Object hay String
-        const rawParent = msg.parent_message;
+        // JA: parent_message または parent_message_id から ID を抽出 (文字列・オブジェクト両対応)
+        // VI: Bóc tách parentId chuẩn hỗ trợ cả trường hợp kiểu Object hoặc UUID String
+        const rawParent = (msg as any).parent_message_id || msg.parent_message;
         let parentId: string | null = null;
         if (typeof rawParent === 'object' && rawParent !== null) {
-          parentId = String((rawParent as any).id);
+          parentId = String((rawParent as any).id).toLowerCase();
         } else if (rawParent) {
-          parentId = String(rawParent);
+          parentId = String(rawParent).toLowerCase();
         }
 
-        // Kiểm tra xem node này có rẽ nhánh từ một node cũ (không phải node ngay liền trước) hay không
+        // JA: 直前のノード以外を親としている場合は分岐とみなす
+        // VI: Kiểm tra xem node có rẽ nhánh từ node cũ hơn câu liền trước hay không
         const isBranching = Boolean(
           parentId && 
           nodeIndexMap[parentId] !== undefined && 
           nodeIndexMap[parentId] < idx - 1
         );
 
-        // Tọa độ hiển thị: nếu là nhánh rẽ thì đẩy lệch sang phải (x = 190) để tách nhánh rõ ràng
-        const posX = isBranching ? 190 : 10;
-        const posY = 30 + idx * 85;
+        const posX = isBranching ? 220 : 30;
+        const posY = 20 + idx * 100;
 
         generatedNodes.push({
           id: nodeId,
@@ -208,17 +214,16 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
             fontSize: '11px',
             textAlign: 'center',
             background: isBranching ? '#eff6ff' : '#ffffff',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
             width: 160,
+            cursor: 'grab',
           },
         });
 
-        // Tạo Edge liên kết
         if (idx > 0) {
-          // Nếu parentId hợp lệ và tồn tại trong cây thì nối vào parentId đó, ngược lại mới nối vào câu ngay trước
           const actualParentId = (parentId && nodeIndexMap[parentId] !== undefined)
             ? parentId 
-            : String(userMsgs[idx - 1].id);
+            : String(userMsgs[idx - 1].id).toLowerCase();
 
           if (actualParentId) {
             generatedEdges.push({
@@ -237,8 +242,9 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       });
     }
 
-    return { nodes: generatedNodes, edges: generatedEdges };
-  }, [messages]);
+    setNodes(generatedNodes);
+    setEdges(generatedEdges);
+  }, [messages, setNodes, setEdges]);
 
   // JA: メッセージ送信ミューテーション（ANSWER/HINT/COMPLETE 共通）
   // VI: Mutation gửi tin nhắn (dùng chung cho ANSWER/HINT/COMPLETE)
@@ -277,9 +283,13 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   const handleCompleteClick = () => {
     if (!currentSessionId) return;
     if (hasKnowledgeNode) {
+      // JA: バックエンドは message_text 省略/空文字を許容する(COMPLETEは本文不要)ため、
+      //     以前のようにダミー文字列を送って会話履歴を汚す必要はない。
+      // VI: Backend chấp nhận message_text bỏ trống (COMPLETE không cần nội dung), nên
+      //     không cần gửi chuỗi giả làm bẩn lịch sử hội thoại như trước.
       sendMessageMutation.mutate({
         sessionId: currentSessionId,
-        payload: { message_text: '[COMPLETE]', action_type: 'COMPLETE', understood: true },
+        payload: { message_text: '', action_type: 'COMPLETE', understood: true },
       });
       return;
     }
@@ -294,7 +304,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     sendMessageMutation.mutate({
       sessionId: currentSessionId,
       payload: {
-        message_text: '[COMPLETE]',
+        message_text: '',
         action_type: 'COMPLETE',
         understood: true,
         topic_id: topicId,
@@ -342,7 +352,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   return (
     <div style={{ width: '100%', fontFamily: 'sans-serif', color: '#333', boxSizing: 'border-box' }}>
       
-      {/* JA: 思考ツリー表示切り替えボタン / VI: Nút Toggle Ẩn/Hiện Sơ đồ tư duy */}
+      {/* Nút Toggle Ẩn/Hiện Sơ đồ tư duy */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
           Hint Chat Session / Phiên gợi ý
@@ -414,11 +424,11 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       {/* JA: チャット領域と思考ツリー領域のコンテナ / VI: Container chứa Cột Chat & Cột Sơ đồ tư duy */}
       <div style={{ display: 'flex', gap: '16px', width: '100%', marginBottom: '16px' }}>
         
-        {/* JA: 左カラム：チャット表示エリア / VI: CỘT TRÁI: Khung hiển thị chat */}
+        {/* CỘT TRÁI: Khung hiển thị chat */}
         <div
           style={{
             flex: 1.2,
-            height: '460px',
+            height: '480px',
             border: '1px solid #e5e7eb',
             borderRadius: '8px',
             backgroundColor: '#ffffff',
@@ -444,31 +454,25 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
               const isUser = (senderRole || '').toUpperCase() === 'USER';
               const textContent = msg.message_text || (msg as any).content || '';
 
-              // Lấy câu hỏi USER đứng ngay phía trước
               const userMsgsBefore = messages
                 .slice(0, index)
                 .filter(m => ((m.sender || (m as any).sender_type || '').toUpperCase() === 'USER'));
               
               const immediatePrevUserMsg = userMsgsBefore.length > 0 ? userMsgsBefore[userMsgsBefore.length - 1] : null;
 
-              // Bóc tách suggested_parent_id chuẩn kiểu dữ liệu
-              const rawSuggestedParent = msg.suggested_parent_id;
+              const rawSuggestedParent = (msg as any).suggested_parent_id || msg.suggested_parent_id;
               const suggestedParentIdStr = typeof rawSuggestedParent === 'object' && rawSuggestedParent !== null
-                ? (rawSuggestedParent as any).id
-                : rawSuggestedParent;
+                ? String((rawSuggestedParent as any).id).toLowerCase()
+                : String(rawSuggestedParent || '').toLowerCase();
 
-              // CHỈ HIỂN THỊ BANNER CONFIRM NẾU:
-              // 1. Là tin nhắn USER chưa confirm (parent_confirmed === false)
-              // 2. Có suggested_parent_id
-              // 3. suggested_parent_id KHÁC với câu hỏi USER ngay liền trước (thực sự đang rẽ nhánh về câu cũ)
               const needsBranchConfirm = 
                 isUser && 
                 !msg.parent_confirmed && 
                 Boolean(suggestedParentIdStr) && 
-                suggestedParentIdStr !== (immediatePrevUserMsg ? String(immediatePrevUserMsg.id) : null);
+                suggestedParentIdStr !== (immediatePrevUserMsg ? String(immediatePrevUserMsg.id).toLowerCase() : '');
 
               const suggestedParentMsg = needsBranchConfirm 
-                ? messages.find(m => String(m.id) === String(suggestedParentIdStr)) 
+                ? messages.find(m => String(m.id).toLowerCase() === suggestedParentIdStr) 
                 : null;
 
               return (
@@ -490,13 +494,25 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                         color: isUser ? '#ffffff' : '#1f2937',
                         border: isUser ? 'none' : '1px solid #e5e7eb',
                         whiteSpace: 'pre-wrap',
+
+                        // JA: AIのヒントメッセージはコピー不可、ユーザーメッセージはコピー可能
+                        // VI: Chặn copy tin nhắn AI, cho phép copy tin nhắn USER
+                        userSelect: isUser ? 'text' : 'none',
+                        WebkitUserSelect: isUser ? 'text' : 'none',
+                        msUserSelect: isUser ? 'text' : 'none',
+                      }}
+                      onCopy={(e) => {
+                        if (!isUser) {
+                          e.preventDefault();
+                          alert('JA: AIのヒントメッセージはコピーできません。 / VI: Không thể copy tin nhắn gợi ý từ AI.');
+                        }
                       }}
                     >
                       {textContent}
                     </div>
                   </div>
 
-                  {/* JA: 分岐提案の確認バー (Confirm Banner) / VI: Thanh gợi ý rẽ nhánh cho User bấm Confirm */}
+                  {/* Thanh gợi ý rẽ nhánh cho User bấm Confirm */}
                   {needsBranchConfirm && currentSessionId && (
                     <div
                       style={{
@@ -542,11 +558,10 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            // Lấy parent_message hiện tại để giữ nguyên
-                            const rawMsgParent = msg.parent_message;
+                            const rawMsgParent = (msg as any).parent_message_id || msg.parent_message;
                             const currentParentId = typeof rawMsgParent === 'object' && rawMsgParent !== null
-                              ? (rawMsgParent as any).id
-                              : rawMsgParent;
+                              ? String((rawMsgParent as any).id).toLowerCase()
+                              : String(rawMsgParent || '').toLowerCase();
 
                             confirmParentMutation.mutate({
                               sessionId: currentSessionId,
@@ -593,12 +608,12 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           </div>
         </div>
 
-        {/* JA: 右カラム：思考プロセスツリー（React Flow） / VI: CỘT PHẢI: Sơ đồ tư duy (React Flow) */}
+        {/* CỘT PHẢI: Sơ đồ tư duy (React Flow) */}
         {showTree && (
           <div
             style={{
               flex: 1,
-              height: '460px',
+              height: '480px',
               border: '1px solid #e5e7eb',
               borderRadius: '8px',
               backgroundColor: '#ffffff',
@@ -608,21 +623,32 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            <h3 style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 12px 0', color: '#111827' }}>
-              🌿 思考プロセス / Tiến trình tư duy
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0, color: '#111827' }}>
+                🌿 思考プロセス / Tiến trình tư duy
+              </h3>
+              <span style={{ fontSize: '11px', color: '#6b7280' }}>✋ Có thể kéo/thả node</span>
+            </div>
 
             <div style={{ flex: 1, width: '100%', border: '1px solid #f3f4f6', borderRadius: '6px' }}>
-              <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                fitView
+                nodesDraggable={true}
+                proOptions={{ hideAttribution: true }}
+              >
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#d1d5db" />
-                <Controls position="bottom-left" showInteractive={false} />
+                <Controls position="bottom-left" showInteractive={true} />
               </ReactFlow>
             </div>
           </div>
         )}
       </div>
 
-      {/* JA: メッセージ入力フォーム / VI: Form nhập liệu tin nhắn */}
+      {/* Form nhập liệu tin nhắn */}
       <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
         <input
           type="text"
