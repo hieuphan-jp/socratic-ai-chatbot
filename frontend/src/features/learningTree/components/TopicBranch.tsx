@@ -45,7 +45,7 @@ export function TopicBranch({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        className="flex w-full items-center gap-2 rounded-xl border-0 bg-transparent px-2 py-1.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
       >
         <ChevronRight
           className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}

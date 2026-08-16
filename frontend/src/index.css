@@ -10,6 +10,60 @@
  *     vì các màn hình chưa chuyển sang Tailwind (HomePage, LoginPage, HintChatPage...)
  *     đang dựng bằng inline style, giả định chưa có Tailwind. Bật preflight sẽ vô tình
  *     đổi giao diện những màn đó. Giữ nguyên cách này trong lúc chuyển dần từng tính năng.
+ *
+ * JA: ★アプリ全体のベーストークン(色・フォント)。2本の「木」UI
+ *     (学習木・チャットの思考ツリー)を平行四辺形の葉デザインに統一するにあたり、
+ *     既存の teal/emerald/amber/slate と馴染むパステル系のleaf(葉)・branch(枝)
+ *     スケールをここで新設した。個別画面ではなく全体のトークンとして置くことで、
+ *     今後Tailwind移行が進む画面でも同じ色を再利用できるようにする。
+ * VI: ★Token nền tảng (màu/font) cho toàn app. Khi thống nhất 2 UI "cây"
+ *     (cây học tập, cây tư duy của chat) về hình lá song song, đã thêm thang màu
+ *     leaf (lá)/branch (cành) tông pastel, hài hòa với teal/emerald/amber/slate
+ *     hiện có. Đặt ở tầng token chung thay vì riêng từng màn để các màn hình
+ *     chuyển sang Tailwind sau này cũng dùng lại được.
  */
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  /* JA: 葉(平行四辺形)の定着度スケール。既存のemeraldより彩度を落とし、
+         最上段も白文字にせず読みやすい濃緑テキストのまま統一する。
+     VI: Thang độ ghi nhớ của lá (hình bình hành). Giảm độ bão hòa so với
+         emerald mặc định; bậc cao nhất vẫn giữ chữ xanh đậm dễ đọc, không đổi
+         sang chữ trắng. */
+  --color-leaf-50: #f1f7ec;
+  --color-leaf-100: #e2eeda;
+  --color-leaf-200: #c9e0b8;
+  --color-leaf-300: #abcf98;
+  --color-leaf-400: #8cbd78;
+  --color-leaf-500: #6fa85c;
+  --color-leaf-600: #57904a;
+  --color-leaf-ink: #33502b;
+
+  /* JA: 枝(幹)の色。青系の「回路」的な配色から、木らしい優しい茶〜土色へ。
+     VI: Màu cành (thân). Đổi từ tông xanh "mạch điện" sang nâu đất mềm mại,
+         giống thân cây thật. */
+  --color-branch-100: #efe6d8;
+  --color-branch-300: #d9c3a1;
+  --color-branch-500: #b08d5b;
+  --color-branch-600: #8e6f45;
+
+  /* JA: 全体で使うフォント。ネットワーク経由のWebフォントは追加せず、
+         各OSに入っている丸ゴシック系を優先することで柔らかい印象にする
+         (読み込み待ちや外部依存が発生しない)。
+     VI: Font dùng chung toàn app. Không thêm web font tải qua mạng; ưu tiên
+         font "chữ tròn" có sẵn theo từng OS để tạo cảm giác mềm mại (không
+         phải chờ tải, không phụ thuộc bên ngoài). */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Hiragino Maru Gothic ProN', 'BIZ UDPGothic', 'Yu Gothic',
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* JA: bodyのfont-familyのみ変更。既存のインラインstyle画面はここを上書きしていないので
+      安全に全体へ効く(インラインstyleは常にこれより優先されるため既存画面は壊れない)。
+   VI: Chỉ đổi font-family của body. Các màn hình dùng inline style hiện tại không ghi
+      đè giá trị này nên áp dụng an toàn cho toàn app (inline style luôn ưu tiên hơn,
+      không phá vỡ giao diện cũ). */
+body {
+  font-family: var(--font-sans);
+}

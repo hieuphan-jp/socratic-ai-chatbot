@@ -13,19 +13,30 @@
 import type { ReviewSchedule, TreeNode } from '@/shared/types'
 
 // JA: index = mastery_level。0は未学習(灰)、1〜5は復習回数に応じて緑が濃くなる。
+//     ★葉の塗り色/枠線色はindex.cssの@themeで定義したleaf-*(パステル系)トークンを
+//     CSS変数として直接参照する(var(--color-leaf-400)など)。SVGのfill/stroke属性は
+//     CSS変数をそのまま解決できるので、16進値をここに重複させる必要がない
+//     (色を変えたい時はindex.cssの@themeを直すだけで両方の木に反映される)。
+//     最上段(5)も彩度を抑え、白文字にはしない(パステル方針)。
 // VI: index = mastery_level. 0 là chưa học (xám), 1-5 xanh đậm dần theo số lần ôn.
-const LEAF_STYLES = [
-  'bg-slate-100 border-slate-200 text-slate-500',
-  'bg-emerald-50 border-emerald-200 text-emerald-700',
-  'bg-emerald-100 border-emerald-300 text-emerald-700',
-  'bg-emerald-200 border-emerald-400 text-emerald-800',
-  'bg-emerald-400 border-emerald-500 text-white',
-  'bg-emerald-600 border-emerald-700 text-white',
+//     ★Màu nền/viền của lá tham chiếu trực tiếp biến CSS của token leaf-* (tông
+//     pastel) định nghĩa ở @theme trong index.css (vd var(--color-leaf-400)).
+//     Thuộc tính fill/stroke của SVG đọc được biến CSS bình thường nên không cần
+//     lặp lại giá trị hex ở đây (muốn đổi màu chỉ cần sửa @theme trong index.css,
+//     cả 2 cây đều tự cập nhật theo).
+//     Bậc cao nhất (5) vẫn giữ độ bão hòa thấp, không đổi sang chữ trắng.
+const LEAF_TONES = [
+  { fill: '#f1f5f9', stroke: '#cbd5e1', textClassName: 'text-slate-500' }, // 0: 未学習(Tailwind標準色のまま)
+  { fill: 'var(--color-leaf-50)', stroke: 'var(--color-leaf-200)', textClassName: 'text-leaf-ink' }, // 1
+  { fill: 'var(--color-leaf-100)', stroke: 'var(--color-leaf-300)', textClassName: 'text-leaf-ink' }, // 2
+  { fill: 'var(--color-leaf-200)', stroke: 'var(--color-leaf-400)', textClassName: 'text-leaf-ink' }, // 3
+  { fill: 'var(--color-leaf-300)', stroke: 'var(--color-leaf-500)', textClassName: 'text-leaf-ink' }, // 4
+  { fill: 'var(--color-leaf-400)', stroke: 'var(--color-leaf-600)', textClassName: 'text-leaf-ink' }, // 5
 ] as const
 
-export function leafStyleForMastery(level: number): string {
-  const idx = Math.min(Math.max(Math.round(level), 0), LEAF_STYLES.length - 1)
-  return LEAF_STYLES[idx]
+export function leafToneForMastery(level: number): (typeof LEAF_TONES)[number] {
+  const idx = Math.min(Math.max(Math.round(level), 0), LEAF_TONES.length - 1)
+  return LEAF_TONES[idx]
 }
 
 // JA: node_id -> ReviewSchedule の対応表を作る。無い葉は「未学習」。

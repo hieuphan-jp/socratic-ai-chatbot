@@ -104,6 +104,11 @@ Do not include any preamble, meta-commentary, or markdown formatting.
 
 NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
 SESSION_NODE_TITLE_MAX_LEN = 255
+# JA: セッション名が未指定かつノードにも紐づかない(フリーチャット)場合の既定名。
+#     ChatSession.title のモデル既定値と揃えること。
+# VI: Tên mặc định khi không chỉ định tên và cũng không gắn node (chat tự do).
+#     Phải khớp với giá trị mặc định của model ChatSession.title.
+DEFAULT_SESSION_TITLE = "New Chat Session"
 # JA: 分岐推定でAIに見せる過去質問1件あたりの最大文字数 / VI: Độ dài tối đa mỗi câu hỏi cũ đưa cho AI
 NODE_TOPIC_MAX_LEN = 100
 # JA: AIに渡す会話履歴の最大件数と1件あたりの最大文字数（トークン節約）
@@ -112,14 +117,45 @@ MAX_HISTORY_MESSAGES = 20
 HISTORY_MESSAGE_MAX_LEN = 600
 
 
-def create_chat_session_for_node(*, user, node_id=None, title: str = "New Session") -> ChatSession:
+def _session_title_for_node(node) -> str:
+    """
+    JA: セッション名をノード名から組み立てる。「木から復習を始めた時」
+        (create_chat_session_for_node)と「フリーチャットが完了してノードが
+        生まれた時」(create_knowledge_node_from_session)の両方で使う
+        唯一の命名規則にする。ここが2箇所でズレると、タイムログ上で
+        同じノードのセッションなのに名前が違う、という状態が起きる。
+    VI: Ghép tên session từ tên node. Dùng làm quy tắc đặt tên duy nhất cho cả
+        2 trường hợp: "bắt đầu ôn tập từ cây" (create_chat_session_for_node)
+        và "chat tự do hoàn thành, sinh ra node" (create_knowledge_node_from_session).
+        Nếu 2 nơi này lệch nhau thì trên nhật ký thời gian sẽ có tình trạng
+        cùng 1 node nhưng tên session khác nhau.
+    """
+    return f"学習: {node.title}"
+
+
+def create_chat_session_for_node(*, user, node_id=None, title: str | None = None) -> ChatSession:
     # JA: 他アプリ所有のKnowledgeNodeは、所有権チェック込みの窓口経由で取得する
     #     (CONVENTIONS.md §10)。直接 objects.filter(id=...) で引くと、他人のノードに
     #     自分のセッションを紐付けられてしまう。
     # VI: KnowledgeNode thuộc app khác nên phải lấy qua cửa ngõ có kiểm tra quyền sở hữu
     #     (CONVENTIONS.md §10). Nếu tự query objects.filter(id=...) thì user có thể gắn
     #     session của mình vào node của người khác.
+    #
+    # JA: 【設計変更 2026-08-16】title の既定値を None にした。以前は "New Session" を
+    #     番兵にして「未指定ならノード名から命名する」判定をしていたが、views 側が
+    #     未指定時に "New Chat Session" を渡していたため番兵と一致せず、ノード由来の
+    #     命名が一度も発火していなかった。結果、学習木から復習を始めたセッションが
+    #     すべて "New Chat Session" になり、タイムログ上で見分けが付かなくなっていた。
+    #     「未指定」は None で表し、既定値の決定はこの services に一本化する。
+    # VI: 【Thay đổi thiết kế 2026-08-16】Đổi mặc định của title thành None. Trước đây dùng
+    #     "New Session" làm sentinel để xét "chưa chỉ định thì đặt tên theo node", nhưng
+    #     views lại truyền "New Chat Session" khi không chỉ định nên không khớp sentinel,
+    #     khiến việc đặt tên theo node chưa từng chạy. Hệ quả: mọi phiên mở từ cây học tập
+    #     đều tên "New Chat Session", không phân biệt được trên nhật ký thời gian.
+    #     "Chưa chỉ định" biểu thị bằng None, và việc quyết định giá trị mặc định gom về services.
     from apps.topics import services as topics_services
+
+    title = (title or "").strip()
 
     node = None
     if node_id:
@@ -129,10 +165,12 @@ def create_chat_session_for_node(*, user, node_id=None, title: str = "New Sessio
         if existing:
             return existing
 
-        if title == "New Session":
-            title = f"学習: {node.title}"
+        if not title:
+            title = _session_title_for_node(node)
 
-    return ChatSession.objects.create(user=user, knowledge_node=node, title=title)
+    return ChatSession.objects.create(
+        user=user, knowledge_node=node, title=title or DEFAULT_SESSION_TITLE
+    )
 
 
 def _extract_text(raw_response) -> str:
@@ -467,12 +505,24 @@ def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
         KnowledgeNodeとして保存し、このセッションと1:1(OneToOne)で紐付ける。
         KnowledgeNodeの作成自体は所有アプリ(apps.topics)のservices経由で行う
         (このアプリからKnowledgeNode.objects.createを直接呼ばない)。
+        ★【設計変更 2026-08-16】session.title もここでノード名から更新する。
+        以前は knowledge_node の紐付けだけ行い title を放置していたため、
+        フリーチャットから完了させたセッションはタイムログ上でずっと
+        "New Chat Session"(フロントの既定名)のままだった。命名規則は
+        _session_title_for_node に一本化してあるので、木から復習を始めた
+        セッションと同じ "学習: <ノード名>" になる。
     VI: Được gọi khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn
         thành". Nhờ AI tóm tắt hội thoại thành title/content, lưu thành một
         KnowledgeNode mới dưới Topic được chỉ định, và gắn 1:1 (OneToOne)
         với session này. Việc tạo KnowledgeNode được ủy thác qua services
         của app sở hữu (apps.topics), không gọi thẳng
         KnowledgeNode.objects.create từ app này.
+        ★【Thay đổi thiết kế 2026-08-16】Cũng cập nhật session.title theo tên
+        node ở đây. Trước đây chỉ gắn knowledge_node mà bỏ mặc title, nên
+        session hoàn thành từ chat tự do mãi mãi giữ tên "New Chat Session"
+        (tên mặc định của frontend) trên nhật ký thời gian. Quy tắc đặt tên
+        đã gom về _session_title_for_node nên sẽ ra cùng dạng "学習: <tên node>"
+        như session bắt đầu ôn tập từ cây.
     """
     from apps.topics import services as topics_services
 
@@ -483,7 +533,8 @@ def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
     )
 
     session.knowledge_node = node
-    session.save(update_fields=["knowledge_node"])
+    session.title = _session_title_for_node(node)
+    session.save(update_fields=["knowledge_node", "title"])
     return node
 
 

@@ -26,15 +26,30 @@ class ChatSessionViewSet(
     permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        return ChatSession.objects.filter(user=self.request.user).prefetch_related(
-            "messages", "attempts"
+        # JA: ★チャットタイムログ(セッション一覧)は新しい順に並べる。knowledge_node化
+        #     (完了ボタン)されているかは問わず、フリーの途中セッションも含めて全件返す
+        #     ── 「昨日どこまで学習したか」の振り返りに使うため、完了/未完了で絞らない。
+        # VI: ★Danh sách phiên chat (chat timeline) sắp mới nhất trước. Không lọc theo
+        #     đã tạo knowledge_node (đã bấm hoàn thành) hay chưa — bao gồm cả phiên dở
+        #     dang, vì dùng để "xem lại hôm qua học đến đâu" nên không được lọc bỏ.
+        return (
+            ChatSession.objects.filter(user=self.request.user)
+            .prefetch_related("messages", "attempts")
+            .order_by("-created_at")
         )
 
     def perform_create(self, serializer):
+        # JA: title 未指定は None のまま services に渡す。ここで既定文字列を埋めると
+        #     services 側の「未指定ならノード名から命名する」判定が働かなくなる
+        #     (2026-08-16 の不具合。create_chat_session_for_node のコメント参照)。
+        # VI: Không chỉ định title thì truyền None nguyên vẹn cho services. Nếu điền
+        #     chuỗi mặc định ở đây thì phán đoán "chưa chỉ định thì đặt tên theo node"
+        #     bên services sẽ không chạy (lỗi ngày 2026-08-16, xem comment ở
+        #     create_chat_session_for_node).
         serializer.instance = services.create_chat_session_for_node(
             user=self.request.user,
             node_id=serializer.validated_data.get("node_id"),
-            title=serializer.validated_data.get("title", "New Chat Session"),
+            title=serializer.validated_data.get("title"),
         )
 
     @action(detail=True, methods=["post"], url_path="send-message")

@@ -41,6 +41,20 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
   },
+  // JA: ★学習木から特定のチャットセッションに入り直すための経路(復習フロー)。
+  //     セッションIDをURLに載せることで、木の葉から「復習を始める」を押した先が
+  //     ブラウザの戻る/進む・リロードでも保たれる。
+  // VI: ★Đường vào lại một phiên chat cụ thể từ cây học tập (luồng ôn tập).
+  //     Đặt ID phiên lên URL để đích đến khi bấm "Bắt đầu ôn tập" từ lá cây vẫn
+  //     giữ nguyên khi back/forward hoặc tải lại trang.
+  {
+    path: '/hint-chat/:sessionId',
+    element: (
+      <RequireAuth>
+        <HintChatPage />
+      </RequireAuth>
+    ),
+  },
   { path: '/login', element: <LoginPage /> },
   // JA: 未知のパスはトップへ。VI: Đường dẫn lạ về trang chủ.
   { path: '*', element: <Navigate to="/" replace /> },
