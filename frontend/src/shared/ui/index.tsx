@@ -1,45 +1,45 @@
 /**
  * shared/ui/index.tsx
  *
- * JA: 全 feature で使い回す最小限の共通 UI 部品。見た目の統一とマークアップの重複排除が目的。
- *     ここには「どの機能にも依存しない」汎用部品だけを置く（業務ロジックを持ち込まない）。
- * VI: Bộ UI dùng chung tối thiểu cho mọi feature. Mục đích: đồng nhất giao diện, tránh lặp markup.
- *     Chỉ đặt component tổng quát "không phụ thuộc feature nào" (không mang logic nghiệp vụ).
+ * JA: 共通UI部品の窓口。画面側は必ず `@/shared/ui` からまとめて import する
+ *     (個別ファイルを直接 import しない = 置き場所を変えても画面を壊さないため)。
+ *
+ *     ★2026-08 デザイン統一: ここにあった Button/Input/Notice/ErrorText の
+ *     インラインstyle実装をやめ、Tailwind版に置き換えた。import 名は同じなので
+ *     既存画面はそのまま動くが、見た目は新しいトークン(角丸2xl・teal基調)に揃う。
+ *
+ *     どの部品をいつ使うかは DESIGN_SYSTEM.md を参照。ここに無い見た目が必要に
+ *     なったら、画面側で作り込む前にまずこのフォルダに足すか相談すること。
+ * VI: Cửa vào của bộ UI dùng chung. Phía màn hình LUÔN import gộp từ `@/shared/ui`
+ *     (không import thẳng từng file = đổi chỗ đặt file cũng không vỡ màn hình).
+ *
+ *     ★Thống nhất thiết kế 2026-08: đã bỏ bản inline style của Button/Input/Notice/
+ *     ErrorText ở đây, thay bằng bản Tailwind. Tên import giữ nguyên nên màn hình cũ
+ *     vẫn chạy, nhưng giao diện sẽ khớp token mới (bo góc 2xl, tông teal).
+ *
+ *     Dùng component nào lúc nào: xem DESIGN_SYSTEM.md. Cần một hình thức chưa có ở
+ *     đây thì trước khi tự chế trong màn hình, hãy thêm vào thư mục này hoặc trao đổi trước.
  */
-import type { ButtonHTMLAttributes, InputHTMLAttributes } from 'react'
+export { Badge } from './Badge'
+export type { BadgeTone } from './Badge'
 
-export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { style, ...rest } = props
-  return (
-    <button
-      {...rest}
-      style={{
-        padding: '8px 14px',
-        borderRadius: 6,
-        border: '1px solid #ccc',
-        cursor: props.disabled ? 'not-allowed' : 'pointer',
-        ...style,
-      }}
-    />
-  )
-}
+export { Button } from './Button'
+export type { ButtonSize, ButtonVariant } from './Button'
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  const { style, ...rest } = props
-  return (
-    <input
-      {...rest}
-      style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #ccc', ...style }}
-    />
-  )
-}
+export { Card } from './Card'
+export type { CardTone } from './Card'
 
-// JA: エラー・空・読み込みの表示を統一する小物。
-// VI: Tiện ích nhỏ để hiển thị lỗi/rỗng/đang tải một cách nhất quán.
-export function Notice({ children }: { children: React.ReactNode }) {
-  return <p style={{ color: '#666', fontSize: 14 }}>{children}</p>
-}
+export { EmptyState, ErrorText, LoadingText, Notice } from './Feedback'
 
-export function ErrorText({ children }: { children: React.ReactNode }) {
-  return <p style={{ color: '#c0392b', fontSize: 14 }}>{children}</p>
-}
+export { Input } from './Input'
+
+export { LanguageSwitcher } from './LanguageSwitcher'
+
+export { Leaf, LeafButton } from './Leaf'
+
+export { PageContainer } from './PageContainer'
+
+export { PageHeader } from './PageHeader'
+
+export { SegmentedControl } from './SegmentedControl'
+export type { SegmentedOption } from './SegmentedControl'

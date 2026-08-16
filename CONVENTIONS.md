@@ -146,6 +146,10 @@ python manage.py startapp yourapp apps/yourapp   # フォルダを apps/ 配下�
 3. `shared/api/queryKeys.ts` にキーを1グループ追加。
 4. `components/` に表示部品。`pages/` で組み立て、`app/router.tsx` にルートを1行追加。
 5. §9 のフロントパターンをコピー元にする。
+6. **見た目は [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md) に従う**（色・部品・多言語化）。
+   UIは `@/shared/ui` の部品を使い、文言は `t()` 経由で3言語(ja/vi/en)書く。
+   / **Giao diện tuân theo [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)** (màu, component, đa ngôn ngữ).
+   Dùng component trong `@/shared/ui`, câu chữ viết đủ 3 ngôn ngữ (ja/vi/en) qua `t()`.
 
 ---
 
@@ -198,6 +202,7 @@ Khi xóa field, phải sửa **luôn trong cùng PR** những nơi đang dùng n
 - [ ] クエリキーは `queryKeys.ts` からか / Query key từ `queryKeys.ts` chưa
 - [ ] ファイル冒頭に2言語コメントがあるか / Đầu file có comment 2 ngôn ngữ chưa
 - [ ] フィールドを消したなら、使っていた側も直したか（§6）/ Nếu xóa field, đã sửa cả nơi đang dùng chưa (§6)
+- [ ] 画面を触ったなら [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md) §6 のチェックも通ったか（inline style無し・文言は3言語）/ Nếu có sửa màn hình, đã qua checklist §6 của `DESIGN_SYSTEM.md` chưa (không inline style, câu chữ đủ 3 ngôn ngữ)
 - [ ] `python manage.py test apps` が緑か（§13）/ `python manage.py test apps` có xanh không (§13)
 - [ ] CI が緑か / CI có xanh không
 

@@ -69,9 +69,12 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     }
   }, [propSessionId]);
 
-  // JA: 新しいチャットセッションを作成するミューテーション / VI: Mutation tạo phiên chat mới
+  // JA: 新しいチャットセッションを作成するミューテーション。
+  //     ★titleはここでも固定文字列を埋めない(chatApi.createSessionのコメント参照)。
+  // VI: Mutation tạo phiên chat mới.
+  //     ★Cũng không điền chuỗi cố định cho title ở đây (xem comment ở chatApi.createSession).
   const createSessionMutation = useMutation({
-    mutationFn: (title?: string) => chatApi.createSession(title || 'Hint Chat Session'),
+    mutationFn: (title?: string) => chatApi.createSession(title),
     onSuccess: (newSession: any) => {
       const newId = newSession.id;
       setCurrentSessionId(newId);
@@ -241,7 +244,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
 
     if (!targetSessionId) {
       try {
-        const newSession: any = await createSessionMutation.mutateAsync('Hint Chat Session');
+        const newSession: any = await createSessionMutation.mutateAsync(undefined);
         targetSessionId = newSession.id;
         setCurrentSessionId(targetSessionId);
         if (onSessionCreated && targetSessionId) {

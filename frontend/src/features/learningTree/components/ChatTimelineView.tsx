@@ -7,16 +7,26 @@
  *     ★知識ノード化(完了ボタン)されているかは問わない。学習内容ツリー(木構造)は
  *     知識ノード化されたものしか出ないため、「途中まで学習した内容も振り返りたい」
  *     という用途はこちらが担う。LearningTreePage側でボタン切替してこの画面を出す。
+ *     ★選んだセッションには「復習を始める」/「学習を再開する」ボタンを出し、実際に
+ *     そのチャット画面(/hint-chat/:sessionId)に入って続きを対話できるようにする。
+ *     ここでは既にセッションID自体がタイムログの一覧に載っているため、
+ *     NodeDetailPanelのようなget-or-create(node_id→session_id)は不要で、
+ *     素直にそのIDへ遷移するだけでよい。
  * VI: View "Nhật ký thời gian" của màn hình cây nội dung đã học. Giống sidebar bên
  *     trái của Gemini, liệt kê toàn bộ phiên chat của user theo thời gian tạo mới
  *     nhất trước, chọn vào để đọc lại hội thoại (ChatHistoryPanel) theo thứ tự thời gian.
  *     ★Không phân biệt đã tạo knowledge node (đã hoàn thành) hay chưa. Cây nội dung đã
  *     học chỉ hiện phần đã thành knowledge node, nên nhu cầu "xem lại cả phần học dở"
  *     do view này đảm nhiệm. LearningTreePage bấm nút để chuyển sang view này.
+ *     ★Session đang chọn có nút "Bắt đầu ôn tập" / "Tiếp tục học" để vào thẳng màn
+ *     hình chat (/hint-chat/:sessionId) và nói tiếp. Ở đây ID session đã có sẵn trong
+ *     danh sách nhật ký thời gian nên không cần get-or-create (node_id→session_id)
+ *     như NodeDetailPanel, chỉ cần điều hướng thẳng tới ID đó.
  */
 import { useState } from 'react'
 
-import { MessageCircle, MessagesSquare } from 'lucide-react'
+import { MessageCircle, MessagesSquare, Play } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 import { ErrorText } from '@/shared/ui'
 
@@ -40,6 +50,7 @@ function formatSessionDate(isoString: string): string {
 export function ChatTimelineView() {
   const { data: sessions, isPending, isError, error } = useAllChatSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   if (isPending) return <p className="text-sm text-slate-400">読み込み中… / Đang tải…</p>
   if (isError) return <ErrorText>{(error as Error).message}</ErrorText>
@@ -83,7 +94,21 @@ export function ChatTimelineView() {
       <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
         {selectedSession ? (
           <>
-            <h3 className="mb-4 text-sm font-semibold text-slate-800">{selectedSession.title}</h3>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="min-w-0 truncate text-sm font-semibold text-slate-800">
+                {selectedSession.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => navigate(`/hint-chat/${selectedSession.id}`)}
+                className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-teal-600 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-700"
+              >
+                <Play className="h-3 w-3" />
+                {selectedSession.knowledge_node
+                  ? '復習を始める / Bắt đầu ôn tập'
+                  : '学習を再開する / Tiếp tục học'}
+              </button>
+            </div>
             <ChatHistoryPanel sessionId={String(selectedSession.id)} />
           </>
         ) : (

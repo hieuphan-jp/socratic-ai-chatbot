@@ -199,6 +199,45 @@ class CompletionFlowTestCase(TestCase):
         self.assertIsNotNone(free_session.knowledge_node)
         self.assertEqual(free_session.title, f"学習: {free_session.knowledge_node.title}")
 
+    def test_free_chat_first_message_names_session_even_if_never_completed(self):
+        """
+        JA: 【回帰】完了ボタンを一度も押さずに終わったフリーチャットでも、最初の
+            メッセージを送った時点でセッション名が既定名("New Chat Session")から
+            変わること。以前は完了時にしか改名しなかったため、途中で終わった
+            セッションはタイムログ上でずっと既定名のままだった(2026-08-16)。
+        VI: 【Hồi quy】Chat tự do dù chưa từng bấm hoàn thành, vẫn phải đổi tên
+            session ngay khi gửi tin nhắn đầu tiên (khỏi tên mặc định "New Chat
+            Session"). Trước đây chỉ đổi tên lúc hoàn thành, nên session bỏ dở
+            giữa chừng mãi mãi giữ tên mặc định trên nhật ký thời gian (2026-08-16).
+        """
+        free_session = services.create_chat_session_for_node(user=self.user)
+
+        services.send_message_and_get_ai_response(
+            session=free_session,
+            user_message_text="二分探索のアルゴリズムについて教えてください",
+            action_type="ANSWER",
+        )
+
+        free_session.refresh_from_db()
+        self.assertIsNone(free_session.knowledge_node)
+        self.assertNotEqual(free_session.title, services.DEFAULT_SESSION_TITLE)
+        self.assertEqual(free_session.title, "二分探索のアルゴリズムについて教えてください")
+
+    def test_second_message_does_not_rename_already_named_session(self):
+        """JA: 2件目以降の発言では改名しない(最初の1件だけの規則) / VI: Không đổi tên từ tin nhắn thứ 2 trở đi"""
+        free_session = services.create_chat_session_for_node(user=self.user)
+        services.send_message_and_get_ai_response(
+            session=free_session, user_message_text="最初の質問です", action_type="ANSWER"
+        )
+        free_session.refresh_from_db()
+        first_title = free_session.title
+
+        services.send_message_and_get_ai_response(
+            session=free_session, user_message_text="2つ目の質問です", action_type="ANSWER"
+        )
+        free_session.refresh_from_db()
+        self.assertEqual(free_session.title, first_title)
+
 
 class BigramBranchingTestCase(TestCase):
     """

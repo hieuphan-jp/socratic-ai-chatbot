@@ -1,0 +1,49 @@
+/**
+ * shared/i18n/messages/auth.ts
+ *
+ * JA: 認証まわり(ログイン・ログアウト・ホーム)の文言。キーは 'auth.' 始まり。
+ * VI: Câu chữ phần xác thực (đăng nhập, đăng xuất, trang chủ). Khóa bắt đầu bằng 'auth.'.
+ */
+import { defineMessages } from './defineMessages'
+
+export const authMessages = defineMessages({
+  ja: {
+    'auth.login.title': 'ログイン',
+    'auth.login.username': 'ユーザー名',
+    'auth.login.password': 'パスワード',
+    'auth.login.submit': 'ログイン',
+    'auth.login.submitting': 'ログイン中…',
+    'auth.logout': 'ログアウト',
+    'auth.home.title': 'ホーム',
+    'auth.home.subtitle': '今日の学習を始めましょう',
+    'auth.home.learningTree': '学習内容ツリー',
+    'auth.home.hintChat': 'ヒントチャット',
+    'auth.checking': '認証を確認しています…',
+  },
+  vi: {
+    'auth.login.title': 'Đăng nhập',
+    'auth.login.username': 'Tên đăng nhập',
+    'auth.login.password': 'Mật khẩu',
+    'auth.login.submit': 'Đăng nhập',
+    'auth.login.submitting': 'Đang đăng nhập…',
+    'auth.logout': 'Đăng xuất',
+    'auth.home.title': 'Trang chủ',
+    'auth.home.subtitle': 'Bắt đầu việc học hôm nay nào',
+    'auth.home.learningTree': 'Cây nội dung đã học',
+    'auth.home.hintChat': 'Chat gợi ý',
+    'auth.checking': 'Đang kiểm tra đăng nhập…',
+  },
+  en: {
+    'auth.login.title': 'Sign in',
+    'auth.login.username': 'Username',
+    'auth.login.password': 'Password',
+    'auth.login.submit': 'Sign in',
+    'auth.login.submitting': 'Signing in…',
+    'auth.logout': 'Sign out',
+    'auth.home.title': 'Home',
+    'auth.home.subtitle': "Let's start today's learning",
+    'auth.home.learningTree': 'Learning tree',
+    'auth.home.hintChat': 'Hint chat',
+    'auth.checking': 'Checking your session…',
+  },
+})

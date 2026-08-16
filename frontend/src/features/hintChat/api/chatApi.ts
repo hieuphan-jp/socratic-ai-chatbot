@@ -17,8 +17,20 @@ export const chatApi = {
   },
 
   // 2. Tạo phiên chat mới
-  createSession: async (title: string = 'New Session', nodeId?: number) => {
-    const res = await client.post<ChatSession>('/chat-sessions/', { title, node_id: nodeId })
+  // JA: ★titleを省略した時にフロントで固定文字列を埋めない。バックエンドの
+  //     既定名(DEFAULT_SESSION_TITLE)に一本化することで、最初のメッセージ送信時に
+  //     セッション名を自動命名するロジック(services.py)が正しく発火する。
+  //     以前はここで "New Session" を必ず埋めていたため、タイムログ上のフリー
+  //     チャットが完了しない限りずっと同じ名前のままになっていた。
+  // VI: ★Không điền chuỗi cố định ở frontend khi bỏ trống title. Gộp về tên mặc định
+  //     của backend (DEFAULT_SESSION_TITLE) để logic tự đặt tên session khi gửi tin
+  //     nhắn đầu tiên (services.py) chạy đúng. Trước đây luôn điền "New Session" ở
+  //     đây nên chat tự do trên nhật ký thời gian giữ nguyên tên cho tới khi hoàn thành.
+  createSession: async (title?: string, nodeId?: number) => {
+    const res = await client.post<ChatSession>('/chat-sessions/', {
+      ...(title ? { title } : {}),
+      node_id: nodeId,
+    })
     return res
   },
 

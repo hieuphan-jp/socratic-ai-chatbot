@@ -109,6 +109,9 @@ SESSION_NODE_TITLE_MAX_LEN = 255
 # VI: Tên mặc định khi không chỉ định tên và cũng không gắn node (chat tự do).
 #     Phải khớp với giá trị mặc định của model ChatSession.title.
 DEFAULT_SESSION_TITLE = "New Chat Session"
+# JA: フリーチャットの最初のメッセージからセッション名を作る時の最大文字数。
+# VI: Độ dài tối đa khi tạo tên session từ tin nhắn đầu tiên của chat tự do.
+FIRST_MESSAGE_TITLE_MAX_LEN = 30
 # JA: 分岐推定でAIに見せる過去質問1件あたりの最大文字数 / VI: Độ dài tối đa mỗi câu hỏi cũ đưa cho AI
 NODE_TOPIC_MAX_LEN = 100
 # JA: AIに渡す会話履歴の最大件数と1件あたりの最大文字数（トークン節約）
@@ -131,6 +134,28 @@ def _session_title_for_node(node) -> str:
         cùng 1 node nhưng tên session khác nhau.
     """
     return f"学習: {node.title}"
+
+
+def _title_from_first_message(text: str) -> str:
+    """
+    JA: フリーチャットの最初のメッセージからセッション名を作る。完了(知識ノード化)を
+        待たずに、送った瞬間からタイムログ上で見分けが付くようにするため
+        (完了しないまま終わったセッションはずっと既定名のままになっていた不具合の修正)。
+        AI要約は使わない(応答を待たせたくない・要約コストをかけたくない)ので、
+        本文の先頭を短く切り詰めるだけの単純な規則にする。完了時は
+        _session_title_for_node による「学習: <ノード名>」が上書きするので、
+        ここでの名前は「完了するまでの仮の名前」という位置づけ。
+    VI: Tạo tên session từ tin nhắn đầu tiên của chat tự do. Để nhận ra được trên
+        nhật ký thời gian ngay từ lúc gửi, không cần đợi hoàn thành (thành knowledge node)
+        (sửa lỗi session bị bỏ dở giữa chừng thì mãi mãi giữ tên mặc định).
+        Không dùng AI tóm tắt (không muốn làm chậm phản hồi / tốn chi phí), nên chỉ cắt
+        ngắn phần đầu nội dung theo quy tắc đơn giản. Khi hoàn thành thì tên "学習: <tên node>"
+        từ _session_title_for_node sẽ ghi đè, nên tên ở đây chỉ là "tên tạm cho tới khi hoàn thành".
+    """
+    stripped = text.strip()
+    if len(stripped) <= FIRST_MESSAGE_TITLE_MAX_LEN:
+        return stripped
+    return stripped[:FIRST_MESSAGE_TITLE_MAX_LEN].rstrip() + "…"
 
 
 def create_chat_session_for_node(*, user, node_id=None, title: str | None = None) -> ChatSession:
@@ -638,6 +663,12 @@ def send_message_and_get_ai_response(
     if action_type in NEEDS_AI_ANSWER and not text:
         raise ValidationError("メッセージ内容は必須です / Nội dung tin nhắn là bắt buộc")
 
+    # JA: ★このメッセージがセッションの最初の1件かどうかを、他の書き込みが起きる前に
+    #     判定しておく(下でuser_msg/ai_msgを作った後だと必ずFalseになってしまう)。
+    # VI: ★Xét xem tin nhắn này có phải tin đầu tiên của session không, trước khi có
+    #     ghi nào khác xảy ra (nếu xét sau khi đã tạo user_msg/ai_msg thì luôn ra False).
+    is_first_message = not session.messages.exists()
+
     # JA: ★フリーチャット(knowledge_node未設定)がCOMPLETEした瞬間に、初めて
     #     知識ノードを作成しこのセッションと1:1で紐付ける。既にノードがある
     #     セッション(復習チャット)ではここは通らない。record_review_result は
@@ -712,6 +743,20 @@ def send_message_and_get_ai_response(
             message_text=text,
             node_type=user_node_type,
         )
+
+        # JA: ★フリーチャット(knowledge_node未設定)の最初のメッセージなら、
+        #     完了(知識ノード化)を待たずに本文からセッション名を付ける。
+        #     node紐付き(復習チャット)や、既に命名済みのセッションは対象外。
+        # VI: ★Nếu là tin nhắn đầu tiên của chat tự do (chưa gắn knowledge_node),
+        #     đặt tên session từ nội dung mà không cần đợi hoàn thành (thành node).
+        #     Không áp dụng cho session đã gắn node (chat ôn tập) hay đã có tên riêng.
+        if (
+            is_first_message
+            and session.knowledge_node_id is None
+            and session.title == DEFAULT_SESSION_TITLE
+        ):
+            session.title = _title_from_first_message(text)
+            session.save(update_fields=["title"])
 
     ai_msg = ChatMessage.objects.create(
         session=session,

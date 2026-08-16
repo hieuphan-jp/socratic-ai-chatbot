@@ -1,43 +1,75 @@
 /**
  * pages/HomePage.tsx
  *
- * JA: ログイン後の着地点となる最小の土台ページ（プレースホルダ）。
- *     認証の動作確認用に、現在ユーザー表示とログアウトだけを置く。機能の中身は各担当が
- *     features/ を作り、pages/ と app/router.tsx に追加していく（手順は CONVENTIONS.md §5）。
- * VI: Trang nền tối thiểu làm điểm đến sau khi đăng nhập (placeholder).
- *     Chỉ hiển thị user hiện tại và nút đăng xuất để kiểm tra xác thực. Nội dung tính năng do
- *     mỗi người tạo trong features/ rồi thêm vào pages/ và app/router.tsx (xem CONVENTIONS.md §5).
+ * JA: ログイン後の着地点。各機能への入口を並べる。
+ *     ★デザイン統一の参考実装(お手本)。新しい画面を作る/直すときは、この形
+ *     (PageContainer → PageHeader → Card/部品、文言は全て t() 経由)をコピー元にする。
+ *     詳しくは DESIGN_SYSTEM.md を参照。
+ * VI: Điểm đến sau khi đăng nhập. Liệt kê lối vào từng tính năng.
+ *     ★Bản mẫu tham khảo cho việc thống nhất thiết kế. Khi tạo/sửa màn hình mới, dùng
+ *     đúng khuôn này (PageContainer → PageHeader → Card/component, mọi câu chữ qua t()).
+ *     Chi tiết xem DESIGN_SYSTEM.md.
  */
 import { Link, useNavigate } from 'react-router-dom'
 
+import { MessagesSquare, TreeDeciduous } from 'lucide-react'
+
 import { useLogout, useMe } from '@/features/auth/api/hooks'
-import { Button, Notice } from '@/shared/ui'
+import { useI18n } from '@/shared/i18n'
+import { Button, Card, LanguageSwitcher, PageContainer, PageHeader } from '@/shared/ui'
 
 export function HomePage() {
   const navigate = useNavigate()
   const me = useMe()
   const logout = useLogout()
+  const { t } = useI18n()
 
   return (
-    <main style={{ maxWidth: 560, margin: '40px auto', display: 'grid', gap: 20 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 20 }}>ホーム / Trang chủ</h1>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          {me.data && <span style={{ fontSize: 14, color: '#666' }}>{me.data.username}</span>}
-          <Button onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login') })}>
-            ログアウト / Đăng xuất
-          </Button>
-        </div>
-      </header>
-      {/* JA: ここから各機能を追加する / VI: Thêm các tính năng từ đây */}
-      <nav style={{ display: 'flex', gap: 12 }}>
-        <Link to="/learning-tree">学習内容ツリー / Cây nội dung</Link>
-        <Link to="/hint-chat">ヒントチャット / Chat gợi ý</Link>
-      </nav>
-      <Notice>
-        ここに各自の機能を追加します（features/ を作成 → pages/ で組み立て → router に追加）。
-        / Thêm tính năng của bạn tại đây (tạo features/ → lắp ở pages/ → thêm vào router).
-      </Notice>
-    </main>
+    <PageContainer>
+      <PageHeader
+        title={t('auth.home.title')}
+        subtitle={t('auth.home.subtitle')}
+        actions={
+          <>
+            <LanguageSwitcher />
+            {me.data && <span className="text-xs text-slate-500">{me.data.username}</span>}
+            <Button
+              size="sm"
+              onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/login') })}
+            >
+              {t('auth.logout')}
+            </Button>
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Link to="/learning-tree" className="no-underline">
+          <Card className="h-full transition-shadow hover:shadow-md">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-leaf-100 text-leaf-ink">
+                <TreeDeciduous className="h-5 w-5" />
+              </span>
+              <span className="text-sm font-semibold text-slate-800">
+                {t('auth.home.learningTree')}
+              </span>
+            </div>
+          </Card>
+        </Link>
+
+        <Link to="/hint-chat" className="no-underline">
+          <Card className="h-full transition-shadow hover:shadow-md">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-teal-100 text-teal-700">
+                <MessagesSquare className="h-5 w-5" />
+              </span>
+              <span className="text-sm font-semibold text-slate-800">
+                {t('auth.home.hintChat')}
+              </span>
+            </div>
+          </Card>
+        </Link>
+      </div>
+    </PageContainer>
   )
 }

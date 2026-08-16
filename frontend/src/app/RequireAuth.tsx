@@ -9,12 +9,19 @@
 import { Navigate } from 'react-router-dom'
 
 import { useMe } from '@/features/auth/api/hooks'
-import { Notice } from '@/shared/ui'
+import { useI18n } from '@/shared/i18n'
+import { LoadingText, PageContainer } from '@/shared/ui'
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const me = useMe()
+  const { t } = useI18n()
 
-  if (me.isPending) return <Notice>確認中… / Đang kiểm tra…</Notice>
+  if (me.isPending)
+    return (
+      <PageContainer width="narrow">
+        <LoadingText>{t('auth.checking')}</LoadingText>
+      </PageContainer>
+    )
   // JA: 取得失敗（401/403）＝未ログイン → ログイン画面へ。
   // VI: Lấy thất bại (401/403) = chưa đăng nhập -> tới trang login.
   if (me.isError) return <Navigate to="/login" replace />
