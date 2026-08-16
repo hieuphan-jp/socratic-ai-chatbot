@@ -43,6 +43,10 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "suggested_parent_id",
             "parent_confidence",
             "parent_confirmed",
+            # JA: 思考ツリー上の位置づけ(幹/枝/ステップ外)と、ノードに出す要約タイトル。
+            # VI: Vai trò trên cây tư duy (thân/nhánh/không phải bước) và tiêu đề tóm tắt của node.
+            "step_kind",
+            "step_title",
             "sender",
             "message_text",
             "is_hint",

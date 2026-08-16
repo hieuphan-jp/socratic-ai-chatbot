@@ -14,7 +14,7 @@ VI: Kiểm tra tính năng đoán nhánh (xác nhận node cha) và luồng hoà
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.chat import services
+from apps.chat import branching, services, steps
 from apps.chat.models import Attempt, ChatMessage, ChatSession
 from apps.common.exceptions import NotFound, ValidationError
 from apps.reviews.models import ReviewLog, ReviewSchedule
@@ -143,3 +143,178 @@ class CompletionFlowTestCase(TestCase):
             services.send_message_and_get_ai_response(
                 session=free_session, user_message_text="", action_type="COMPLETE", understood=True
             )
+
+
+class BigramBranchingTestCase(TestCase):
+    """
+    JA: 文字bigramによる分岐推定(AI不使用)の判定ロジック。
+        「拾えること」より「誤って拾わないこと」を重点的に守る。誤検知は思考ツリーの
+        形を黙って壊すが、検出漏れは単に直前の続きになるだけで害が小さいため。
+    VI: Logic đoán nhánh bằng bigram ký tự (không dùng AI).
+        Ưu tiên "không nhận nhầm" hơn là "bắt được hết". Nhận nhầm sẽ âm thầm làm hỏng
+        hình dạng cây tư duy, còn bỏ sót chỉ khiến nó nối tiếp bước liền trước, ít hại hơn.
+    """
+
+    def test_detects_return_to_older_topic(self):
+        suggestion = branching.suggest_parent(
+            new_text="さっきの三平方の定理の証明も教えてください",
+            candidates=[
+                ("a", "三平方の定理について教えてください"),
+                ("b", "直角三角形の斜辺はどう求めますか"),
+                ("c", "円の面積の公式を知りたいです"),
+            ],
+        )
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion.parent_id, "a")
+        self.assertTrue(branching.should_adopt(suggestion))
+
+    def test_natural_continuation_is_not_a_branch(self):
+        suggestion = branching.suggest_parent(
+            new_text="判別式が負のときはどうなりますか",
+            candidates=[
+                ("a", "二次方程式の解き方を教えてください"),
+                ("b", "判別式とは何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_polite_ending_alone_is_not_treated_as_similarity(self):
+        # JA: 話題が全く違っても「〜てください」が共通なだけで分岐にしてはいけない。
+        #     定型表現を除去する前は、この2文が score 0.15 に達して誤検知していた。
+        # VI: Dù khác hẳn chủ đề, chỉ vì cùng đuôi "〜てください" thì không được coi là rẽ nhánh.
+        #     Trước khi loại cụm cố định, 2 câu này đạt score 0.15 và bị nhận nhầm.
+        suggestion = branching.suggest_parent(
+            new_text="行列式の計算方法を教えてください",
+            candidates=[
+                ("a", "三平方の定理について教えてください"),
+                ("b", "円の面積の公式を知りたいです"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_shared_generic_word_stays_low_confidence(self):
+        # JA: 「方程式」だけが共通の場合は候補には挙がっても採用しない。
+        # VI: Nếu chỉ chung mỗi từ "phương trình" thì có thể thành ứng viên nhưng không được dùng.
+        suggestion = branching.suggest_parent(
+            new_text="連立方程式はどう解きますか",
+            candidates=[
+                ("a", "二次方程式の解き方を教えてください"),
+                ("b", "一次方程式との違いは何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_aizuchi_does_not_branch(self):
+        suggestion = branching.suggest_parent(
+            new_text="そうですね",
+            candidates=[
+                ("a", "微分の基本を教えてください"),
+                ("b", "積分との関係は何ですか"),
+            ],
+        )
+        self.assertFalse(branching.should_adopt(suggestion))
+
+    def test_needs_at_least_two_candidates(self):
+        # JA: 直前1件しかないなら「出戻り先」が存在しない。
+        # VI: Chỉ có 1 ứng viên thì không tồn tại "bước cũ để quay lại".
+        self.assertIsNone(
+            branching.suggest_parent(new_text="続きを教えて", candidates=[("a", "微分の基本")])
+        )
+
+    def test_empty_text_is_safe(self):
+        self.assertIsNone(
+            branching.suggest_parent(new_text="", candidates=[("a", "微分"), ("b", "積分")])
+        )
+
+
+class StepClassificationTestCase(TestCase):
+    """
+    JA: 相槌の足切りと、幹/枝の番号採番(1, 2, 3, 3-1)の検証。どちらもAIを使わない純ロジック。
+    VI: Kiểm tra việc lọc câu đệm và đánh số thân/nhánh (1, 2, 3, 3-1). Đều là logic thuần, không dùng AI.
+    """
+
+    def test_aizuchi_is_trivial(self):
+        for text in ["そうですね", "なるほど", "はい", "OK", "ありがとうございます", "vâng"]:
+            self.assertTrue(steps.is_trivial_message(text), text)
+
+    def test_real_question_is_not_trivial(self):
+        for text in [
+            "HTMLの役割について教えてください",
+            "なぜ判別式が必要なの？",
+            "そうですね、では次にCSSについて教えて",
+        ]:
+            self.assertFalse(steps.is_trivial_message(text), text)
+
+    def test_short_question_with_question_mark_is_kept(self):
+        # JA: 短くても疑問符があれば質問として扱う。
+        # VI: Ngắn nhưng có dấu hỏi thì vẫn coi là câu hỏi.
+        self.assertFalse(steps.is_trivial_message("なぜ?"))
+
+    def test_step_labels_number_trunk_and_branches(self):
+        user = User.objects.create_user(username="labels", password="password")
+        session = ChatSession.objects.create(user=user, title="t")
+        Kind = ChatMessage.StepKind
+
+        s1 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="1", step_kind=Kind.TRUNK
+        )
+        s2 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="2", step_kind=Kind.TRUNK
+        )
+        b1 = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="2の枝",
+            step_kind=Kind.BRANCH,
+            parent_message=s2,
+        )
+        b2 = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="2の枝その2",
+            step_kind=Kind.BRANCH,
+            parent_message=s2,
+        )
+        nested = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="枝の枝",
+            step_kind=Kind.BRANCH,
+            parent_message=b1,
+        )
+        s3 = ChatMessage.objects.create(
+            session=session, sender="USER", message_text="3", step_kind=Kind.TRUNK
+        )
+
+        labels = steps.build_step_labels([s1, s2, b1, b2, nested, s3])
+        self.assertEqual(labels[s1.id], "1")
+        self.assertEqual(labels[s2.id], "2")
+        self.assertEqual(labels[b1.id], "2-1")
+        self.assertEqual(labels[b2.id], "2-2")
+        self.assertEqual(labels[nested.id], "2-1-1")
+        # JA: ★枝が挟まっても幹の番号は連番のまま(以前はここが時系列の通し番号でズレていた)。
+        # VI: ★Dù có nhánh xen giữa, số của thân vẫn liên tiếp (trước đây đánh số theo thời gian nên lệch).
+        self.assertEqual(labels[s3.id], "3")
+
+    def test_graph_excludes_non_step_messages(self):
+        user = User.objects.create_user(username="graph", password="password")
+        session = ChatSession.objects.create(user=user, title="t")
+        trunk = ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text="HTMLとは",
+            step_kind=ChatMessage.StepKind.TRUNK,
+            step_title="HTMLとは",
+        )
+        # JA: 相槌とAIの返答は木に出ない。 VI: Câu đệm và câu trả lời AI không lên cây.
+        ChatMessage.objects.create(session=session, sender="USER", message_text="そうですね")
+        ChatMessage.objects.create(session=session, sender="AI", message_text="いい質問です")
+
+        graph = services.get_session_graph_data(session=session)
+        self.assertEqual([n["id"] for n in graph["nodes"]], [str(trunk.id)])
+        self.assertEqual(graph["nodes"][0]["data"]["step_label"], "1")
+        self.assertEqual(graph["nodes"][0]["data"]["title"], "HTMLとは")
+
+    def test_fallback_title_strips_question_tail(self):
+        self.assertEqual(steps.fallback_title("HTMLの役割について教えてください"), "HTMLの役割")
+        self.assertEqual(steps.fallback_title("二次方程式とは何ですか？"), "二次方程式")

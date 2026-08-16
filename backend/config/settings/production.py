@@ -39,3 +39,7 @@ CSRF_COOKIE_SECURE = True
 
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "gemini")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# JA: 分岐推定の方式(ai / bigram / off)。詳細は local.py のコメントを参照。
+# VI: Phương thức đoán nhánh (ai / bigram / off). Xem chú thích ở local.py.
+CHAT_BRANCHING_STRATEGY = os.environ.get("CHAT_BRANCHING_STRATEGY", "ai")

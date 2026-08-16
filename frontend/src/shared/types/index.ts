@@ -19,14 +19,20 @@ export type SenderType = 'USER' | 'AI'
 export type NodeType = 'STEP' | 'ANSWER' | 'CHANGE_METHOD'
 
 // JA: チャットメッセージ。ChatMessageSerializer と対応。
+//     ★親は parent_message_id という名前で返る(parent_message というフィールドは無い)。
 // VI: Tin nhắn chat, tương ứng ChatMessageSerializer backend.
+//     ★Node cha trả về với tên parent_message_id (KHÔNG có field tên parent_message).
 export type ChatMessage = {
   id: string
   session: string
-  parent_message: string | null
+  parent_message_id: string | null
   suggested_parent_id?: string | null
   parent_confidence?: 'high' | 'low' | ''
   parent_confirmed?: boolean
+  // JA: 思考ツリー上の位置づけと、ノードに出す要約タイトル。
+  // VI: Vai trò trên cây tư duy và tiêu đề tóm tắt hiển thị trên node.
+  step_kind?: StepKind
+  step_title?: string
   sender: SenderType
   message_text: string
   is_hint: boolean
@@ -146,15 +152,29 @@ export type ConfirmParentPayload = {
   parent_message_id?: string | null
 }
 
+// JA: 思考ツリー上でのステップの種別。ChatMessage.StepKind と対応。
+//     NONE のメッセージ(相槌・AIの返答)は木に現れない。
+// VI: Loại bước trên cây tư duy, tương ứng ChatMessage.StepKind.
+//     Tin nhắn NONE (câu đệm, câu trả lời AI) không hiện trên cây.
+export type StepKind = 'NONE' | 'TRUNK' | 'BRANCH'
+
 // JA: React Flow用のグラフデータ型。GET /api/chat-sessions/{id}/graph/ と対応。
+//     ★step_label(「3-1」など)はサーバーが木を辿って採番したもの。
+//     フロントで通し番号を振ると、枝に分かれたときに番号と位置がズレるため
+//     必ずこの値をそのまま表示すること。
 // VI: Kiểu dữ liệu Graph cho React Flow, tương ứng GET /api/chat-sessions/{id}/graph/.
+//     ★step_label (vd "3-1") do server duyệt cây đánh số.
+//     Nếu frontend tự đánh số tuần tự thì khi rẽ nhánh số sẽ lệch với vị trí,
+//     nên phải hiển thị đúng giá trị này.
 export type FlowNode = {
   id: string
   type: string
   data: {
-    label: string
+    step_label: string
+    title: string
     text: string
-    node_type: NodeType
+    step_kind: StepKind
+    parent_confirmed: boolean
   }
 }
 
@@ -162,15 +182,12 @@ export type FlowEdge = {
   id: string
   source: string
   target: string
+  is_branch: boolean
 }
 
 export type GraphData = {
   nodes: FlowNode[]
   edges: FlowEdge[]
-  step_number?: number       // JA: ステップ番号 / VI: Thứ tự bước (1, 2, 3...)
-  label?: string            // JA: ステップの簡潔な概要 / VI: Tóm tắt ngắn gọn của bước
-  parentId?: string        // JA: 親ステップID / VI: ID bước trước đó
-  childrenIds?: string[]   // JA: 子ステップID群 / VI: Danh sách ID bước con (nếu có chia nhánh)
 }
 
 // JA: 学習内容ツリーのノード。GET /api/learning-tree/ と対応。

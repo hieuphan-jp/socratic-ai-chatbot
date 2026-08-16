@@ -61,6 +61,22 @@ class ChatMessage(BaseModel):
         HIGH = "high", "High"
         LOW = "low", "Low"
 
+    class StepKind(models.TextChoices):
+        """
+        JA: 思考ツリー上でのそのメッセージの位置づけ。
+            NONE   … ステップにしない(相槌・AIの返答など)。チャットには残るが木には出ない。
+            TRUNK  … 幹。当初の目的に向かって前進する大きなステップ。1, 2, 3... と採番される。
+            BRANCH … 枝。既出ステップを掘り下げる小さな質問。親の番号に連ねて 3-1, 3-2 と採番される。
+        VI: Vai trò của tin nhắn trên cây tư duy.
+            NONE   … không phải bước (câu đệm, câu trả lời của AI). Vẫn ở trong chat nhưng không lên cây.
+            TRUNK  … thân. Bước lớn tiến tới mục tiêu ban đầu. Đánh số 1, 2, 3...
+            BRANCH … nhánh. Câu hỏi nhỏ đào sâu một bước đã có. Đánh số nối theo cha: 3-1, 3-2.
+        """
+
+        NONE = "NONE", "ステップにしない / Không phải bước"
+        TRUNK = "TRUNK", "幹(大きなステップ) / Thân (bước lớn)"
+        BRANCH = "BRANCH", "枝(派生した質問) / Nhánh (câu hỏi phái sinh)"
+
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
     parent_message = models.ForeignKey(
         "self",
@@ -98,6 +114,29 @@ class ChatMessage(BaseModel):
     message_text = models.TextField()
     is_hint = models.BooleanField(default=False)
     node_type = models.CharField(max_length=20, choices=NodeType.choices, default=NodeType.STEP)
+
+    # JA: ★思考ツリー上の位置づけ。これが NONE のメッセージは木に現れない。
+    #     以前は全てのユーザー発言が無条件にステップ化されていたため、「そうですね」
+    #     のような相槌までノードになっていた。その判定をここで表現する。
+    # VI: ★Vai trò trên cây tư duy. Tin nhắn có giá trị NONE sẽ không hiện trên cây.
+    #     Trước đây mọi phát ngôn của user đều thành bước vô điều kiện, nên cả câu đệm
+    #     như "そうですね" cũng thành node. Trường này biểu thị phán đoán đó.
+    step_kind = models.CharField(
+        max_length=10,
+        choices=StepKind.choices,
+        default=StepKind.NONE,
+        help_text="JA: 幹/枝/ステップ外の区別 / VI: Phân biệt thân / nhánh / không phải bước",
+    )
+    # JA: ★ノードに表示する短いタイトル。ユーザーの発言そのままではなく要約。
+    #     回答生成と同じ1回のAI呼び出しでまとめて受け取るため、追加のAPIコストは無い。
+    # VI: ★Tiêu đề ngắn hiển thị trên node, là bản tóm tắt chứ không phải nguyên văn phát ngôn.
+    #     Nhận chung trong cùng 1 lần gọi AI với việc sinh câu trả lời nên không tốn thêm chi phí API.
+    step_title = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="JA: ノードに表示する要約タイトル / VI: Tiêu đề tóm tắt hiển thị trên node",
+    )
 
     def __str__(self) -> str:
         return f"[{self.sender}] {self.message_text[:30]}"
