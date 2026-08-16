@@ -56,6 +56,9 @@ def get_llm() -> LLMProvider:
     """
     provider = os.getenv("AI_PROVIDER", "fake").strip()
     api_key = os.getenv("GEMINI_API_KEY", "").strip() or getattr(settings, "GEMINI_API_KEY", "")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "").strip() or getattr(
+        settings, "ANTHROPIC_API_KEY", ""
+    )
 
     if provider == "gemini" and api_key:
         try:
@@ -76,6 +79,26 @@ def get_llm() -> LLMProvider:
             #     → rơi về fake
             print(
                 f"[AI Provider] Không thể khởi tạo GeminiProvider, dùng FakeProvider thay thế. Chi tiết: {e}"
+            )
+
+    if provider == "claude" and anthropic_api_key:
+        try:
+            # JA: 遅延 import。ここで初めて anthropic を読み込む(gemini と同じ理由)。
+            # VI: Import trễ. Chỉ tới đây mới nạp anthropic (lý do giống gemini).
+            from .claude import ClaudeProvider
+
+            return ClaudeProvider(api_key=anthropic_api_key)
+        except (ImportError, ModuleNotFoundError) as e:
+            # JA: パッケージが未インストールの環境 → fake にフォールバック
+            # VI: Máy chưa cài package anthropic → rơi về fake
+            print(
+                f"[AI Provider] Thiếu package 'anthropic', dùng FakeProvider thay thế. Chi tiết: {e}"
+            )
+        except Exception as e:
+            # JA: API キー不正・ネットワークエラーなど、その他の初期化失敗 → fake にフォールバック
+            # VI: Lỗi khác khi khởi tạo Claude (API key sai, lỗi mạng, v.v.) → rơi về fake
+            print(
+                f"[AI Provider] Không thể khởi tạo ClaudeProvider, dùng FakeProvider thay thế. Chi tiết: {e}"
             )
 
     return FakeProvider()

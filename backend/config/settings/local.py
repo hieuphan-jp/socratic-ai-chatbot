@@ -47,6 +47,7 @@ CSRF_TRUSTED_ORIGINS = [
 # VI: Chọn nhà cung cấp AI. Mặc định fake (không cần API key, ai cũng chạy được).
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "fake")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # JA: 思考ツリーの分岐推定の方式。ai=AIにJSONで判定させる / bigram=文字bigram類似度
 #     (AI呼び出しは回答1回だけで判定は無料) / off=推定しない。
