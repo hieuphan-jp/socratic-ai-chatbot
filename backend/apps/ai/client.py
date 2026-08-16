@@ -1,9 +1,7 @@
 import os
 from functools import lru_cache
-from pathlib import Path
 
 from django.conf import settings
-from dotenv import load_dotenv
 
 from .base import LLMProvider
 from .fake import FakeProvider
@@ -20,18 +18,22 @@ from .fake import FakeProvider
 #     → Chỉ import GeminiProvider bên trong get_llm(), khi thực sự cần dùng
 #        (lazy import), để cô lập lỗi thiếu package vào đúng nhánh gemini.
 
-# JA: backend直下の .env を読み込む。★override=False にすること。
-#     True にすると .env がシェルの環境変数を上書きするため、
-#     `AI_PROVIDER=fake python manage.py test` としてもテストが本物のGemini APIを
-#     呼んでしまい、無料枠を食い潰す(実際に発生した)。
-#     明示的に指定した環境変数が常に勝つ、という一般的な優先順位に揃える。
-# VI: Nạp .env ở thư mục backend. ★Phải để override=False.
-#     Nếu để True thì .env sẽ ghi đè biến môi trường của shell, khiến
-#     `AI_PROVIDER=fake python manage.py test` vẫn gọi API Gemini thật và
-#     đốt hết hạn mức miễn phí (đã xảy ra thực tế).
-#     Giữ đúng thứ tự ưu tiên thông thường: biến môi trường chỉ định tường minh luôn thắng.
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
+# JA: ★ここでは load_dotenv() を呼ばない。config/settings/base.py が
+#     Django起動時に必ず1回だけリポジトリ直下の .env を読み込んでおり、
+#     manage.py の実行時点でos.environに反映済みだからである。
+#     以前はここでも backend/.env を override=True で読み直しており、
+#     「ルートの.envとbackend/.envの内容が食い違うと、後から読んだ方が
+#     常に勝つ」という分かりにくい二重管理になっていた
+#     (実際にAI_PROVIDER設定が食い違って気づきにくい形で反映されない事故が発生した)。
+#     読み込み元をbase.pyの1箇所に一本化し、事故の芽を断つ。
+# VI: ★Không gọi load_dotenv() ở đây nữa. config/settings/base.py đã nạp
+#     đúng 1 lần file .env ở gốc repo khi Django khởi động, và giá trị đã
+#     có trong os.environ ngay khi manage.py bắt đầu chạy.
+#     Trước đây ở đây còn đọc lại backend/.env với override=True, tạo ra
+#     kiểu quản lý kép khó hiểu: "nếu nội dung .env gốc và backend/.env
+#     lệch nhau thì file đọc SAU luôn thắng" (thực tế đã xảy ra sự cố
+#     AI_PROVIDER bị lệch mà rất khó nhận ra). Gom về một nguồn duy nhất
+#     (base.py) để loại bỏ nguy cơ này.
 
 
 @lru_cache(maxsize=1)
