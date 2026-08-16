@@ -118,25 +118,26 @@ class GeminiProviderTests(SimpleTestCase):
             contents = MockModel.return_value.generate_content.call_args[0][0]
             self.assertEqual(contents, [{"role": "user", "parts": [""]}])
 
-    def test_retries_on_rate_limit_then_succeeds(self):
+    def test_rate_limit_error_fails_immediately_without_retry(self):
+        # JA: ★リトライしない。以前は3秒→6秒待って最大2回リトライしていたが、
+        #     Googleが実際に要求する待機時間(数十秒)より短く、リトライは
+        #     ほぼ必ず失敗する上にクォータだけ余計に消費していた。今は1回だけ
+        #     試し、失敗したら「ユーザーが自分で再送する」ことを前提にした
+        #     メッセージを返す。
+        # VI: ★Không retry. Trước đây đợi 3s→6s rồi retry tối đa 2 lần, nhưng ngắn
+        #     hơn thời gian Google thực sự yêu cầu (vài chục giây) nên retry gần như
+        #     luôn thất bại mà còn tốn thêm quota. Giờ chỉ thử 1 lần, thất bại thì trả
+        #     thông báo với tiền đề "user tự gửi lại".
         provider = self._make_provider()
-        mock_response = MagicMock(text="ok")
-        rate_limit_error = Exception("429 Too Many Requests")
 
-        with (
-            patch("apps.ai.gemini.genai.GenerativeModel") as MockModel,
-            patch("apps.ai.gemini.time.sleep") as mock_sleep,
-        ):
-            MockModel.return_value.generate_content.side_effect = [
-                rate_limit_error,
-                mock_response,
-            ]
+        with patch("apps.ai.gemini.genai.GenerativeModel") as MockModel:
+            MockModel.return_value.generate_content.side_effect = Exception("429 Too Many Requests")
 
             result = provider.chat([ChatMessage(role="user", content="hi")])
 
-            self.assertEqual(result.text, "ok")
-            self.assertEqual(MockModel.return_value.generate_content.call_count, 2)
-            mock_sleep.assert_called_once()
+            self.assertEqual(MockModel.return_value.generate_content.call_count, 1)
+            self.assertIn("429", result.text)
+            self.assertIn("もう一度送信してください", result.text)
 
     def test_non_rate_limit_error_fails_immediately_without_retry(self):
         provider = self._make_provider()
@@ -147,7 +148,7 @@ class GeminiProviderTests(SimpleTestCase):
             result = provider.chat([ChatMessage(role="user", content="hi")])
 
             self.assertEqual(MockModel.return_value.generate_content.call_count, 1)
-            self.assertIn("[AI Tutor Error]", result.text)
+            self.assertIn("[AI Tutor]", result.text)
 
 
 class FakeProviderTests(SimpleTestCase):

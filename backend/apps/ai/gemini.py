@@ -1,19 +1,10 @@
 import logging
-import time
 
 import google.generativeai as genai
 
 from .base import ChatResult, LLMProvider
 
 logger = logging.getLogger(__name__)
-
-# JA: 429 (レート制限) 時のリトライ設定。
-# VI: Cấu hình retry khi gặp lỗi 429 (rate limit).
-MAX_RETRIES = 2
-BACKOFF_SECONDS = [
-    3,
-    6,
-]  # JA: 1回目失敗後3秒待機、2回目失敗後6秒待機 / VI: Thất bại lần 1 đợi 3s, lần 2 đợi 6s
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
@@ -110,47 +101,45 @@ class GeminiProvider(LLMProvider):
 
         model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
 
-        last_error: Exception | None = None
+        # JA: ★リトライはしない(1回だけ試す)。
+        #     以前は429時に3秒→6秒待って最大2回リトライしていたが、Google側が
+        #     実際に指示してくる待機時間(数十秒)より遥かに短く、リトライは
+        #     ほぼ必ず失敗していた。しかも失敗したリトライもクォータを消費するため、
+        #     「1回の送信で最大3回分のクォータを溶かすのに、成功率はほぼ0」という
+        #     逆効果な実装になっていた。ここでは1回だけ試し、失敗したら理由が
+        #     分かるメッセージをそのまま返す。再試行するかはユーザーの判断に委ねる
+        #     (送信ボタンを再度押すだけで良い)。
+        # VI: ★Không retry (chỉ thử 1 lần).
+        #     Trước đây khi gặp 429 sẽ đợi 3s→6s rồi retry tối đa 2 lần, nhưng thời
+        #     gian đó ngắn hơn nhiều so với thời gian Google thực sự yêu cầu đợi (vài
+        #     chục giây), nên retry gần như luôn thất bại. Hơn nữa các lần retry thất
+        #     bại vẫn tốn quota, nên thành ra "1 lần gửi tốn tối đa 3 lần quota mà tỉ lệ
+        #     thành công gần như 0" — phản tác dụng. Ở đây chỉ thử 1 lần, thất bại thì
+        #     trả thẳng thông báo lý do. Có retry lại hay không là quyết định của user
+        #     (chỉ cần bấm gửi lại).
+        try:
+            response = model.generate_content(contents)
+            return ChatResult(text=response.text)
+        except Exception as e:
+            # JA: ★デバッグ用: Google 側の生エラーをそのままログ出力する。
+            #     quota_metric / quota_id が含まれていれば、RPM (分単位) なのか
+            #     RPD (日単位) なのか、正確な原因が分かる。
+            # VI: ★Debug: log nguyên văn lỗi gốc từ Google. Nếu có chứa
+            #     quota_metric / quota_id thì sẽ biết chính xác là quota theo
+            #     PHÚT (RPM) hay theo NGÀY (RPD) đang bị chạm.
+            logger.error("[Gemini] リクエスト失敗。種別: %s | 詳細: %r", type(e).__name__, e)
 
-        # JA: 429 の場合のみ、指数バックオフしながら最大 MAX_RETRIES 回リトライする。
-        #     それ以外のエラー（不正な入力、ネットワーク断など）は即座に失敗として返す。
-        # VI: CHỈ retry khi gặp lỗi 429, đợi tăng dần (backoff) tối đa MAX_RETRIES lần.
-        #     Các lỗi khác (input sai, mất mạng, v.v.) trả lỗi ngay, không retry.
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                response = model.generate_content(contents)
-                return ChatResult(text=response.text)
-            except Exception as e:
-                last_error = e
-                # JA: ★デバッグ用: Google 側の生エラーをそのままログ出力する。
-                #     quota_metric / quota_id が含まれていれば、RPM (分単位) なのか
-                #     RPD (日単位) なのか、正確な原因が分かる。
-                # VI: ★Debug: log nguyên văn lỗi gốc từ Google. Nếu có chứa
-                #     quota_metric / quota_id thì sẽ biết chính xác là quota theo
-                #     PHÚT (RPM) hay theo NGÀY (RPD) đang bị chạm.
-                logger.error(
-                    "[Gemini] Lần thử %s/%s thất bại. Loại lỗi: %s | Chi tiết: %r",
-                    attempt + 1,
-                    MAX_RETRIES + 1,
-                    type(e).__name__,
-                    e,
+            if _is_rate_limit_error(e):
+                return ChatResult(
+                    text=(
+                        "[AI Tutor] Geminiの利用回数制限(429)に達しました。しばらく待ってから、"
+                        "もう一度送信してください。 / "
+                        "Đã đạt giới hạn số lượt gọi Gemini (429). Vui lòng đợi một chút rồi gửi lại."
+                    )
                 )
-                if _is_rate_limit_error(e) and attempt < MAX_RETRIES:
-                    time.sleep(BACKOFF_SECONDS[attempt])
-                    continue
-                break
-
-        # JA: リトライしても回復しなかった場合の最終エラー処理。
-        # VI: Xử lý lỗi cuối cùng nếu retry vẫn không phục hồi được.
-        error_str = str(last_error)
-        if _is_rate_limit_error(last_error):
             return ChatResult(
                 text=(
-                    "[AI Tutor] Hệ thống Gemini đang bị giới hạn số lượt gọi trong phút này "
-                    "(429 - Too Many Requests / hết quota), đã thử lại nhưng vẫn chưa được. "
-                    "Vui lòng đợi khoảng 30-60 giây rồi thử lại. Nếu lỗi này lặp lại thường "
-                    "xuyên, cân nhắc kiểm tra hạn mức (quota) tại Google AI Studio hoặc đổi "
-                    "sang model có giới hạn request/phút cao hơn."
+                    f"[AI Tutor] Geminiの呼び出しでエラーが発生しました: {e} / "
+                    f"Đã xảy ra lỗi khi gọi Gemini: {e}"
                 )
             )
-        return ChatResult(text=f"[AI Tutor Error] Lỗi khi gọi Gemini API: {error_str}")
