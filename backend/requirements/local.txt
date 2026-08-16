@@ -3,9 +3,6 @@
 # VI: Dùng cho phát triển cục bộ. Kế thừa base và thêm công cụ dev (lint...).
 -r base.txt
 ruff~=0.14
-# JA: Google Gemini AI APIと連携するための公式SDK (プロンプト送信およびAIレスポンス取得用)
-# VI: SDK chính thức để kết nối với Google Gemini AI API (Dùng để gửi prompt và nhận phản hồi AI)
-google-generativeai
 # JA: Anthropic Claude API公式SDK (無料枠のレート制限を避けるための代替プロバイダ)
 # VI: SDK chính thức của Anthropic Claude API (provider thay thế để tránh giới hạn gói miễn phí)
 anthropic

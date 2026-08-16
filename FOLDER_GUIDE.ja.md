@@ -45,6 +45,7 @@
 | `manage.py` | Django コマンドの入口 | 基本編集しない |
 | `requirements/base.txt` | 全環境共通の依存パッケージ | 新しい pip パッケージが要るなら追記 |
 | `requirements/local.txt` | 開発専用ツール（lint等） | 開発専用パッケージが要るなら追記 |
+| `requirements/gemini.txt` | Gemini SDK（`google-generativeai`）用のオプション依存 | Windows ARM64等でビルド失敗するため分離。Gemini実動作確認時のみ `pip install -r requirements/gemini.txt` |
 
 ### `backend/config/` — プロジェクト全体の設定（「地図」役）
 
