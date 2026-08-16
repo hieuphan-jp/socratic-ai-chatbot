@@ -45,6 +45,7 @@ Hai thư mục hoàn toàn độc lập, không import code trực tiếp lẫn 
 | `manage.py` | Điểm vào lệnh Django | Về cơ bản không sửa |
 | `requirements/base.txt` | Thư viện phụ thuộc dùng chung mọi môi trường | Thêm package pip mới nếu cần |
 | `requirements/local.txt` | Công cụ chỉ dùng khi phát triển (lint...) | Thêm package chỉ dùng khi dev nếu cần |
+| `requirements/gemini.txt` | Dependency tùy chọn cho Gemini SDK (`google-generativeai`) | Tách riêng vì build lỗi trên Windows ARM64 v.v. Chỉ cài khi cần kiểm tra Gemini thật: `pip install -r requirements/gemini.txt` |
 
 ### `backend/config/` — Cấu hình toàn dự án (vai trò "bản đồ")
 

@@ -36,7 +36,7 @@ Cung cấp hạ tầng chung (cấu hình, xác thực, model chung, trừu tư�
 │   │   ├── common/         # 基底モデル(UUID)・共通例外・IsOwner権限・seedコマンド
 │   │   ├── accounts/       # カスタムUser・セッション認証API（共通基盤）
 │   │   └── ai/             # LLM抽象化: base(Protocol)/fake/gemini/client
-│   ├── requirements/       # base.txt / local.txt
+│   ├── requirements/       # base.txt / local.txt / gemini.txt
 │   └── manage.py
 └── frontend/
     └── src/
@@ -93,9 +93,15 @@ Từ đây mỗi người thêm tính năng của mình.
 JA: 既定は `AI_PROVIDER=fake` で、**APIキー無しで全員が開発可能**。Gemini を使うときだけ
 `.env` に `AI_PROVIDER=gemini` と `GEMINI_API_KEY=...` を設定します（`gemini.py` は要実装）。
 キー未設定で `gemini` を選んでも、安全のため自動で fake に退避します。
+`google-generativeai`（Gemini公式SDK）は `requirements/local.txt` には含まれていません。
+Windows ARM64など一部の環境で `grpcio`/`cryptography` のビルドに失敗するためです。
+Gemini を実際に呼んで動作確認したい場合のみ `pip install -r requirements/gemini.txt` を実行してください。
 VI: Mặc định `AI_PROVIDER=fake`, **không cần API key mọi người vẫn dev được**. Chỉ khi dùng Gemini
 mới đặt `AI_PROVIDER=gemini` và `GEMINI_API_KEY=...` trong `.env` (`gemini.py` cần được cài).
 Nếu chọn `gemini` mà thiếu key, hệ thống tự lùi về fake cho an toàn.
+`google-generativeai` (SDK chính thức của Gemini) không nằm trong `requirements/local.txt`,
+vì một số môi trường (vd. Windows ARM64) sẽ build lỗi `grpcio`/`cryptography`.
+Chỉ khi thực sự cần gọi Gemini để kiểm tra, hãy chạy `pip install -r requirements/gemini.txt`.
 
 ---
 

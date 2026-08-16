@@ -1,0 +1,11 @@
+# gemini.txt
+# JA: Google Gemini AI API と実際に通信する場合のみインストールする
+#     オプション依存。AI_PROVIDER=fake で開発する場合は不要。
+#     Windows ARM64環境では grpcio/cryptography のビルドに
+#     Rust・MSVC Build Toolsが必要になるため、原則インストールしない。
+# VI: Dependency tùy chọn, chỉ cài khi thực sự cần gọi Google Gemini AI API.
+#     Không cần nếu phát triển với AI_PROVIDER=fake. Trên Windows ARM64,
+#     việc build grpcio/cryptography cần Rust và MSVC Build Tools, nên
+#     về nguyên tắc không cài đặt.
+-r local.txt
+google-generativeai
