@@ -34,6 +34,8 @@ export const queryKeys = {
   reviews: {
     all: ['reviews'] as const,
     schedules: () => [...queryKeys.reviews.all, 'schedules'] as const,
+    // JA: 復習予定日を過ぎた葉だけの一覧(「今日の復習」用)。 VI: Danh sách lá đã quá hạn ôn (dùng cho "Ôn tập hôm nay").
+    due: () => [...queryKeys.reviews.all, 'due'] as const,
   },
   // JA: Topic(学習木のカテゴリ)のクエリキー。list()はルート直下、children(id)は
   //     指定Topic直下(フォルダのドリルダウン)。

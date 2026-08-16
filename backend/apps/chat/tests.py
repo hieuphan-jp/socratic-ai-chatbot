@@ -86,6 +86,33 @@ class SessionOwnershipTestCase(TestCase):
         second = services.create_chat_session_for_node(user=self.owner, node_id=self.node.id)
         self.assertEqual(first.id, second.id)
 
+    def test_session_created_from_node_is_named_after_the_node(self):
+        """
+        JA: 【回帰】学習木から復習を始めたセッションがノード名で命名されること。
+            views が未指定時に "New Chat Session" を渡していたため services の番兵
+            ("New Session")と一致せず、全セッションが同名になりタイムログ上で
+            見分けが付かなくなっていた(2026-08-16)。
+        VI: 【Hồi quy】Phiên mở từ cây học tập phải được đặt tên theo tên node.
+            Do views truyền "New Chat Session" khi không chỉ định nên không khớp
+            sentinel ("New Session") của services, làm mọi phiên trùng tên và không
+            phân biệt được trên nhật ký thời gian (2026-08-16).
+        """
+        session = services.create_chat_session_for_node(user=self.owner, node_id=self.node.id)
+        self.assertEqual(session.title, "学習: 一次方程式")
+
+    def test_explicit_title_is_kept(self):
+        """JA: 明示指定した名前は上書きされない / VI: Tên chỉ định rõ không bị ghi đè"""
+        session = services.create_chat_session_for_node(
+            user=self.owner, node_id=self.node.id, title="復習1回目"
+        )
+        self.assertEqual(session.title, "復習1回目")
+
+    def test_free_chat_without_node_uses_default_title(self):
+        """JA: ノードに紐づかないフリーチャットは既定名 / VI: Chat tự do dùng tên mặc định"""
+        session = services.create_chat_session_for_node(user=self.owner)
+        self.assertEqual(session.title, services.DEFAULT_SESSION_TITLE)
+        self.assertIsNone(session.knowledge_node_id)
+
 
 class CompletionFlowTestCase(TestCase):
     """
@@ -143,6 +170,34 @@ class CompletionFlowTestCase(TestCase):
             services.send_message_and_get_ai_response(
                 session=free_session, user_message_text="", action_type="COMPLETE", understood=True
             )
+
+    def test_free_chat_complete_renames_session_after_node(self):
+        """
+        JA: 【回帰】フリーチャット(node_id未指定で開始)を完了すると、生まれた
+            KnowledgeNodeの名前でセッション名も更新されること。
+            以前は knowledge_node の紐付けだけ行い title を放置していたため、
+            タイムログ上でずっとフロントの既定名("New Chat Session")のままに
+            なっていた(2026-08-16)。
+        VI: 【Hồi quy】Hoàn thành 1 phiên chat tự do (bắt đầu không có node_id)
+            phải đổi tên session theo tên KnowledgeNode vừa sinh ra.
+            Trước đây chỉ gắn knowledge_node mà bỏ mặc title, nên trên nhật ký
+            thời gian mãi mãi giữ tên mặc định của frontend ("New Chat Session")
+            (2026-08-16).
+        """
+        free_session = services.create_chat_session_for_node(user=self.user)
+        self.assertEqual(free_session.title, services.DEFAULT_SESSION_TITLE)
+
+        services.send_message_and_get_ai_response(
+            session=free_session,
+            user_message_text="",
+            action_type="COMPLETE",
+            understood=True,
+            topic_id=self.topic.id,
+        )
+
+        free_session.refresh_from_db()
+        self.assertIsNotNone(free_session.knowledge_node)
+        self.assertEqual(free_session.title, f"学習: {free_session.knowledge_node.title}")
 
 
 class BigramBranchingTestCase(TestCase):

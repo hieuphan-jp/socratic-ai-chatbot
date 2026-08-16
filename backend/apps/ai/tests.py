@@ -286,6 +286,141 @@ class ClaudeProviderTests(SimpleTestCase):
         self.assertIn("nạp", result.text)
 
 
+def _mock_claude_response(text: str):
+    block = MagicMock(type="text", text=text)
+    return MagicMock(content=[block])
+
+
+class ClaudeProviderTests(SimpleTestCase):
+    def _make_provider(self):
+        from apps.ai.claude import ClaudeProvider
+
+        with patch("apps.ai.claude.anthropic.Anthropic"):
+            return ClaudeProvider(api_key="dummy-key-for-test")
+
+    def test_system_message_goes_to_system_param_not_messages(self):
+        provider = self._make_provider()
+        provider.client.messages.create.return_value = _mock_claude_response(
+            "ヒント: まず公式を思い出してみましょう"
+        )
+
+        result = provider.chat(
+            [
+                ChatMessage(role="system", content="You are an AI Tutor."),
+                ChatMessage(role="user", content="三平方の定理を教えて"),
+            ]
+        )
+
+        self.assertEqual(result.text, "ヒント: まず公式を思い出してみましょう")
+        _, kwargs = provider.client.messages.create.call_args
+        self.assertEqual(kwargs["system"], "You are an AI Tutor.")
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "三平方の定理を教えて"}])
+
+    def test_conversation_history_is_sent_with_correct_roles(self):
+        provider = self._make_provider()
+        provider.client.messages.create.return_value = _mock_claude_response("続きのヒント")
+
+        provider.chat(
+            [
+                ChatMessage(role="system", content="You are an AI Tutor."),
+                ChatMessage(role="user", content="質問1"),
+                ChatMessage(role="assistant", content="回答1"),
+                ChatMessage(role="user", content="質問2"),
+            ]
+        )
+
+        _, kwargs = provider.client.messages.create.call_args
+        self.assertEqual(
+            kwargs["messages"],
+            [
+                {"role": "user", "content": "質問1"},
+                {"role": "assistant", "content": "回答1"},
+                {"role": "user", "content": "質問2"},
+            ],
+        )
+
+    def test_dict_messages_are_also_supported(self):
+        provider = self._make_provider()
+        provider.client.messages.create.return_value = _mock_claude_response("ok")
+
+        provider.chat([{"role": "user", "content": "dictでも動く？"}])
+
+        _, kwargs = provider.client.messages.create.call_args
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "dictでも動く？"}])
+
+    def test_empty_messages_sends_single_empty_user_turn(self):
+        provider = self._make_provider()
+        provider.client.messages.create.return_value = _mock_claude_response("ok")
+
+        provider.chat([])
+
+        _, kwargs = provider.client.messages.create.call_args
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": ""}])
+
+    def test_history_starting_with_assistant_gets_leading_empty_user_turn(self):
+        # JA: Claude APIは最初のメッセージがuserである必要があるため。
+        # VI: Claude API yêu cầu tin nhắn đầu tiên phải là role "user".
+        provider = self._make_provider()
+        provider.client.messages.create.return_value = _mock_claude_response("ok")
+
+        provider.chat([ChatMessage(role="assistant", content="先に来たassistant")])
+
+        _, kwargs = provider.client.messages.create.call_args
+        self.assertEqual(
+            kwargs["messages"],
+            [
+                {"role": "user", "content": ""},
+                {"role": "assistant", "content": "先に来たassistant"},
+            ],
+        )
+
+    def test_retries_on_rate_limit_then_succeeds(self):
+        import anthropic as anthropic_sdk
+
+        provider = self._make_provider()
+        rate_limit_error = anthropic_sdk.RateLimitError(
+            "rate limited",
+            response=MagicMock(status_code=429, headers={}),
+            body=None,
+        )
+        provider.client.messages.create.side_effect = [
+            rate_limit_error,
+            _mock_claude_response("ok"),
+        ]
+
+        with patch("apps.ai.claude.time.sleep") as mock_sleep:
+            result = provider.chat([ChatMessage(role="user", content="hi")])
+
+        self.assertEqual(result.text, "ok")
+        self.assertEqual(provider.client.messages.create.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    def test_non_rate_limit_error_fails_immediately_without_retry(self):
+        provider = self._make_provider()
+        provider.client.messages.create.side_effect = Exception("invalid api key")
+
+        result = provider.chat([ChatMessage(role="user", content="hi")])
+
+        self.assertEqual(provider.client.messages.create.call_count, 1)
+        self.assertIn("[AI Tutor Error]", result.text)
+
+    def test_billing_error_stops_immediately_with_friendly_message(self):
+        # JA: 自動チャージOFFで残高切れになった場合、待っても直らないので
+        #     リトライせず、分かりやすいメッセージで止まることを確認する。
+        # VI: Khi tắt auto-reload và hết số dư, đợi cũng không khỏi nên phải
+        #     dừng ngay (không retry) với thông báo dễ hiểu.
+        provider = self._make_provider()
+        billing_error = Exception("Your credit balance is too low to access the Claude API")
+        billing_error.type = "billing_error"
+        provider.client.messages.create.side_effect = billing_error
+
+        result = provider.chat([ChatMessage(role="user", content="hi")])
+
+        self.assertEqual(provider.client.messages.create.call_count, 1)
+        self.assertIn("[AI Tutor]", result.text)
+        self.assertIn("nạp", result.text)
+
+
 class FakeProviderTests(SimpleTestCase):
     def test_echoes_last_user_message(self):
         result = FakeProvider().chat(

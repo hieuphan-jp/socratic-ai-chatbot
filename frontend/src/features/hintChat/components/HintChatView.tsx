@@ -21,9 +21,17 @@ import '@xyflow/react/dist/style.css';
 import { chatApi } from '../api/chatApi';
 import { useChatSessions } from '../api/useChat';
 import { TopicFolderPicker } from './TopicFolderPicker';
+import { StepLeafNode } from './StepLeafNode';
+import { layoutStepTree } from '../utils/stepTreeLayout';
 import { queryKeys } from '@/shared/api/queryKeys';
 import { Button, Notice, ErrorText } from '@/shared/ui';
 import type { ChatMessage, GraphData, SendMessagePayload } from '@/shared/types';
+
+// JA: ★コンポーネント外で定義(毎レンダーで新オブジェクトを作るとReact Flowが
+//     警告を出すため)。葉の見た目はStepLeafNode側に集約する。
+// VI: ★Định nghĩa ngoài component (nếu tạo object mới mỗi lần render, React
+//     Flow sẽ cảnh báo). Hình lá gom hết vào StepLeafNode.
+const NODE_TYPES = { stepLeaf: StepLeafNode };
 
 interface HintChatViewProps {
   activeSessionId?: string;
@@ -142,49 +150,13 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       return;
     }
 
-    // JA: 枝は右へ、幹は左の列に置く。深い枝ほど右にずらして階層が見えるようにする。
-    // VI: Nhánh đặt sang phải, thân ở cột trái. Nhánh càng sâu càng lệch phải để thấy phân cấp.
-    const depthOf = (label: string) => label.split('-').length - 1;
-
-    setNodes(
-      graph.nodes.map((node, index) => {
-        const depth = depthOf(node.data.step_label);
-        const isBranch = node.data.step_kind === 'BRANCH';
-        return {
-          id: node.id,
-          data: {
-            label: `ステップ${node.data.step_label}\n${node.data.title}`,
-          },
-          position: { x: 30 + depth * 190, y: 20 + index * 100 },
-          style: {
-            border: isBranch ? '2px solid #2563eb' : '1px solid #d1d5db',
-            borderRadius: '6px',
-            padding: '8px',
-            fontSize: '11px',
-            textAlign: 'center',
-            whiteSpace: 'pre-wrap',
-            background: isBranch ? '#eff6ff' : '#ffffff',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
-            width: 160,
-            cursor: 'grab',
-          },
-        } as Node;
-      })
-    );
-
-    setEdges(
-      graph.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        animated: !edge.is_branch,
-        style: {
-          stroke: edge.is_branch ? '#2563eb' : '#3b82f6',
-          strokeDasharray: edge.is_branch ? '0' : '4',
-          strokeWidth: edge.is_branch ? 2 : 1.5,
-        },
-      })) as Edge[]
-    );
+    // JA: ★木は下から上へ育つ(rankdir: 'BT')。配置計算はdagreに任せる
+    //     (詳細は utils/stepTreeLayout.ts)。
+    // VI: ★Cây mọc từ dưới lên (rankdir: 'BT'). Việc tính vị trí giao cho dagre
+    //     (chi tiết ở utils/stepTreeLayout.ts).
+    const { nodes: laidOutNodes, edges: laidOutEdges } = layoutStepTree(graph.nodes, graph.edges);
+    setNodes(laidOutNodes);
+    setEdges(laidOutEdges);
   }, [graph, setNodes, setEdges]);
 
 
@@ -576,17 +548,28 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
               <span style={{ fontSize: '11px', color: '#6b7280' }}>✋ Có thể kéo/thả node</span>
             </div>
 
-            <div style={{ flex: 1, width: '100%', border: '1px solid #f3f4f6', borderRadius: '6px' }}>
+            <div
+              style={{
+                flex: 1,
+                width: '100%',
+                border: '1px solid #f3f4f6',
+                borderRadius: '6px',
+                // JA: 下端をうっすら土色に。木が根元(下)から生えている雰囲気を出す。
+                // VI: Tô nhẹ màu đất ở mép dưới, gợi cảm giác cây mọc từ gốc (phía dưới).
+                background: 'linear-gradient(to top, #efe6d8 0%, #f6f2ea 6%, #ffffff 22%)',
+              }}
+            >
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
+                nodeTypes={NODE_TYPES}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 fitView
                 nodesDraggable={true}
                 proOptions={{ hideAttribution: true }}
               >
-                <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#d1d5db" />
+                <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#c9e0b8" />
                 <Controls position="bottom-left" showInteractive={true} />
               </ReactFlow>
             </div>

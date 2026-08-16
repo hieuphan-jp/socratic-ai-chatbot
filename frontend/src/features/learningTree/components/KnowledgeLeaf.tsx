@@ -9,8 +9,9 @@
 import { BookOpen, Clock } from 'lucide-react'
 
 import type { ReviewSchedule, TreeNode } from '@/shared/types'
+import { LeafButton } from '@/shared/ui/Leaf'
 
-import { leafStyleForMastery } from '../lib/mastery'
+import { leafToneForMastery } from '../lib/mastery'
 
 interface KnowledgeLeafProps {
   node: TreeNode
@@ -22,14 +23,15 @@ interface KnowledgeLeafProps {
 export function KnowledgeLeaf({ node, schedule, isSelected, onSelect }: KnowledgeLeafProps) {
   const masteryLevel = schedule?.mastery_level ?? 0
   const isDue = schedule?.is_due ?? false
+  const tone = leafToneForMastery(masteryLevel)
 
   return (
-    <button
-      type="button"
+    <LeafButton
       onClick={() => onSelect(node.id)}
-      className={`group flex w-full items-center gap-2.5 rounded-2xl border px-3 py-2 text-left text-sm transition-all ${leafStyleForMastery(
-        masteryLevel
-      )} ${isSelected ? 'ring-2 ring-indigo-400 ring-offset-1' : 'hover:shadow-sm'}`}
+      selected={isSelected}
+      fill={tone.fill}
+      stroke={tone.stroke}
+      className={`group h-11 gap-2.5 text-sm ${tone.textClassName}`}
     >
       <BookOpen className="h-4 w-4 shrink-0 opacity-70" />
       <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
@@ -42,6 +44,6 @@ export function KnowledgeLeaf({ node, schedule, isSelected, onSelect }: Knowledg
           復習
         </span>
       )}
-    </button>
+    </LeafButton>
   )
 }
