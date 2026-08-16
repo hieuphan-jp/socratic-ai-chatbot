@@ -25,17 +25,39 @@ def _is_rate_limit_error(e: Exception) -> bool:
     )
 
 
+def _to_role_and_content(message) -> tuple[str, str]:
+    """
+    JA: AIChatMessage(role/content属性を持つオブジェクト)と、dict {"role":..,"content":..}
+        の両方を受け付ける(fake.pyの防御的な読み方に合わせる)。
+    VI: Nhận cả AIChatMessage (object có thuộc tính role/content) lẫn dict
+        {"role":.., "content":..} (giống cách đọc phòng thủ của fake.py).
+    """
+    role = getattr(message, "role", None)
+    content = getattr(message, "content", None)
+    if role is None and isinstance(message, dict):
+        role = message.get("role")
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    return role or "user", content or ""
+
+
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
         genai.configure(api_key=self.api_key)
-        self.model = self._get_working_model()
+        # JA: ★モデル名(文字列)だけをここで解決してキャッシュする。GeminiProviderは
+        #     get_llm()経由でプロセス内シングルトンなので、genai.list_models()は
+        #     プロセス起動後1回だけ実行される。GenerativeModel自体はネットワーク
+        #     通信を伴わない軽量なラッパーなので、chat()の中でリクエストごとに
+        #     system_instructionを変えて作り直してよい。
+        # VI: ★Chỉ giải quyết và cache TÊN model (chuỗi) ở đây. Vì GeminiProvider là
+        #     singleton trong process (qua get_llm()), genai.list_models() chỉ chạy
+        #     đúng 1 lần khi process khởi động. Bản thân GenerativeModel là wrapper
+        #     nhẹ, không gọi mạng, nên có thể tạo lại mỗi request trong chat() với
+        #     system_instruction khác nhau.
+        self.model_name = self._resolve_model_name()
 
-    def _get_working_model(self):
-        # JA: これはコンストラクタから1回だけ呼ばれる (get_llm() が @lru_cache で
-        #     シングルトン化されたため)。genai.list_models() はここでのみ実行される。
-        # VI: Hàm này chỉ được gọi 1 lần từ constructor (vì get_llm() đã singleton
-        #     hóa bằng @lru_cache). genai.list_models() chỉ chạy đúng ở đây, 1 lần.
+    def _resolve_model_name(self) -> str:
         preferred_models = [
             "models/gemini-3.5-flash",
             "models/gemini-flash-latest",
@@ -52,27 +74,41 @@ class GeminiProvider(LLMProvider):
 
             for pref in preferred_models:
                 if pref in available_models:
-                    return genai.GenerativeModel(pref)
+                    return pref
 
             for m in available_models:
                 if "gemini-2.5" not in m and ("flash" in m or "pro" in m):
-                    return genai.GenerativeModel(m)
+                    return m
         except Exception:
             pass
 
-        return genai.GenerativeModel("models/gemini-3.5-flash")
+        return "models/gemini-3.5-flash"
 
     def chat(self, messages) -> ChatResult:
-        if isinstance(messages, list) and len(messages) > 0:
-            last_msg = messages[-1]
-            if hasattr(last_msg, "content"):
-                prompt = last_msg.content
-            elif isinstance(last_msg, dict):
-                prompt = last_msg.get("content", str(last_msg))
-            else:
-                prompt = str(last_msg)
-        else:
-            prompt = str(messages)
+        # JA: ★system役割のメッセージはsystem_instructionへ、それ以外(user/assistant)は
+        #     Geminiの複数ターン形式(role: user/model)に変換する。以前はmessages[-1]
+        #     しか送っておらず、システムプロンプトと会話履歴が丸ごと無視されていた。
+        # VI: ★Tin nhắn role "system" đưa vào system_instruction, còn lại (user/assistant)
+        #     chuyển sang định dạng nhiều lượt của Gemini (role: user/model). Trước đây
+        #     chỉ gửi messages[-1], bỏ qua toàn bộ system prompt và lịch sử hội thoại.
+        system_instruction = None
+        contents = []
+        for message in messages if isinstance(messages, list) else [messages]:
+            role, content = _to_role_and_content(message)
+            if role == "system":
+                # JA: systemは1メッセージ想定。複数あれば連結する。
+                # VI: Giả định chỉ có 1 tin system; nếu có nhiều thì nối lại.
+                system_instruction = (
+                    f"{system_instruction}\n\n{content}" if system_instruction else content
+                )
+                continue
+            gemini_role = "model" if role == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": [content]})
+
+        if not contents:
+            contents = [{"role": "user", "parts": [""]}]
+
+        model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
 
         last_error: Exception | None = None
 
@@ -82,7 +118,7 @@ class GeminiProvider(LLMProvider):
         #     Các lỗi khác (input sai, mất mạng, v.v.) trả lỗi ngay, không retry.
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = self.model.generate_content(prompt)
+                response = model.generate_content(contents)
                 return ChatResult(text=response.text)
             except Exception as e:
                 last_error = e
