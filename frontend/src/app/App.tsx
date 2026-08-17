@@ -16,8 +16,12 @@ import { router } from './router'
 
 export function App() {
   useEffect(() => {
-    // JA: 失敗しても致命的でないので握りつぶす（後続の CSRF 取得でも間に合う）。
-    // VI: Lỗi cũng không nghiêm trọng nên bỏ qua (lần lấy CSRF sau vẫn kịp).
+    // JA: あくまで先読み(最初のPOSTを速くするだけ)。失敗しても致命的ではない。
+    //     ここが失敗しても、変更系リクエストの直前に client.ts が改めてトークンを
+    //     取り寄せるため、CSRFが空のまま詰まることはない。
+    // VI: Chỉ là nạp trước (để POST đầu tiên nhanh hơn), lỗi cũng không nghiêm trọng.
+    //     Kể cả lỗi ở đây, client.ts vẫn tự lấy lại token ngay trước request thay đổi
+    //     dữ liệu, nên không bị kẹt với CSRF rỗng.
     void fetchCsrf().catch(() => {})
   }, [])
 

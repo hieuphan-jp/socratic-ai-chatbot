@@ -81,6 +81,21 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => api.post<void>('/auth/logout/'),
     onSuccess: () => {
+      // JA: ★保持しているCSRFトークンも必ず捨てる。Djangoのlogout()はサーバー側で
+      //     CSRFトークンをローテーションするため、ログアウト前のトークンは即座に
+      //     失効する。ここで捨てないと、client.tsのensureCsrfTokenが「トークンは
+      //     ある」と判断して再取得をスキップし、古いトークンを送り続けて、
+      //     ログインし直した後の変更系リクエストが全て403になる
+      //     (実際に本番で「ログアウトして入り直すと403」として発生した)。
+      //     空にしておけば、次の変更系リクエストの直前に新しいトークンを取り直す。
+      // VI: ★Bắt buộc xóa cả CSRF token đang giữ. logout() của Django rotate CSRF
+      //     token ở phía server, nên token trước khi đăng xuất mất hiệu lực ngay.
+      //     Không xóa ở đây thì ensureCsrfToken trong client.ts sẽ tưởng "đã có token"
+      //     và bỏ qua việc lấy lại, cứ gửi token cũ, khiến mọi request thay đổi dữ
+      //     liệu sau khi đăng nhập lại đều bị 403 (đã xảy ra thật ở production với
+      //     hiện tượng "đăng xuất rồi vào lại thì bị 403"). Để rỗng thì lần request
+      //     thay đổi dữ liệu kế tiếp sẽ tự lấy token mới.
+      setCsrfToken('')
       // JA: ログアウト後は全キャッシュを捨てて他人のデータ残存を防ぐ。
       // VI: Sau khi đăng xuất, xóa toàn bộ cache để tránh sót dữ liệu người khác.
       qc.clear()

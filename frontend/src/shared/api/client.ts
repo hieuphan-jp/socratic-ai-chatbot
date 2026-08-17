@@ -85,6 +85,39 @@ export function setCsrfToken(token: string): void {
 // VI: Các method thay đổi dữ liệu cần CSRF token.
 const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+// JA: ★トークンが無いとき、変更系リクエストの直前にその場で取り寄せる。
+//     アプリ起動時(App.tsx)の先読み1回だけに頼ると、次の場合にトークンが空のまま
+//     復旧せず、CSRF 403が出続ける:
+//       - 既にログイン済みの状態でページを再読み込みした(ログイン応答を経由しない)
+//       - 起動時の先読みが失敗した(Render無料プランのスリープ復帰は50秒以上かかる。
+//         かつApp.tsx側は失敗を握りつぶす設計)
+//     取得中に複数の変更系リクエストが重なっても通信が増えないよう、進行中の
+//     Promiseを使い回す。
+// VI: ★Khi chưa có token thì lấy ngay tại chỗ, trước khi gửi request thay đổi dữ liệu.
+//     Nếu chỉ trông cậy vào 1 lần nạp trước lúc khởi động app (App.tsx), token sẽ kẹt
+//     rỗng và lỗi CSRF 403 lặp mãi trong các trường hợp:
+//       - Tải lại trang khi đã đăng nhập sẵn (không đi qua response đăng nhập)
+//       - Lần nạp trước lúc khởi động thất bại (gói free của Render cần hơn 50 giây để
+//         thức dậy, và App.tsx lại nuốt lỗi)
+//     Dùng chung một Promise đang chạy để nhiều request thay đổi dữ liệu trùng thời
+//     điểm không tạo thêm lần gọi mạng thừa.
+let csrfTokenRequest: Promise<void> | null = null
+
+async function ensureCsrfToken(): Promise<void> {
+  if (csrfToken) return
+  if (!csrfTokenRequest) {
+    csrfTokenRequest = fetch(`${API_BASE}/auth/csrf/`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.csrfToken) csrfToken = data.csrfToken
+      })
+      .finally(() => {
+        csrfTokenRequest = null
+      })
+  }
+  await csrfTokenRequest
+}
+
 type RequestOptions = {
   method?: string
   // JA: JSON にして送るボディ。VI: Body sẽ được JSON hóa để gửi.
@@ -97,7 +130,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const headers: Record<string, string> = {}
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
-  if (CSRF_METHODS.has(method)) headers['X-CSRFToken'] = csrfToken
+  if (CSRF_METHODS.has(method)) {
+    await ensureCsrfToken()
+    headers['X-CSRFToken'] = csrfToken
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     method,
