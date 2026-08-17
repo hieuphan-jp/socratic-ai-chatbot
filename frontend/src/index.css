@@ -59,11 +59,19 @@
     'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* JA: bodyのfont-familyのみ変更。既存のインラインstyle画面はここを上書きしていないので
-      安全に全体へ効く(インラインstyleは常にこれより優先されるため既存画面は壊れない)。
-   VI: Chỉ đổi font-family của body. Các màn hình dùng inline style hiện tại không ghi
-      đè giá trị này nên áp dụng an toàn cho toàn app (inline style luôn ưu tiên hơn,
-      không phá vỡ giao diện cũ). */
+/* JA: bodyのfont-familyとmarginだけ変更。既存のインラインstyle画面はここを上書き
+      していないので安全に全体へ効く(インラインstyleは常にこれより優先されるため
+      既存画面は壊れない)。
+      ★margin:0 について: preflightを切っているため、ブラウザ既定のbody margin(8px)が
+      そのまま残っていた。PageHeaderを画面横幅いっぱいのバーにしたことでこの余白が
+      白い隙間として目立つようになったため、ここだけ明示的に消す。
+   VI: Chỉ đổi font-family và margin của body. Các màn hình dùng inline style hiện tại
+      không ghi đè giá trị này nên áp dụng an toàn cho toàn app (inline style luôn ưu
+      tiên hơn, không phá vỡ giao diện cũ).
+      ★Về margin:0: vì tắt preflight nên margin mặc định của trình duyệt (8px) trên body
+      vẫn còn. Từ khi PageHeader thành thanh dài hết chiều rộng màn hình, khoảng trắng
+      này lộ rõ, nên xóa riêng nó ở đây. */
 body {
+  margin: 0;
   font-family: var(--font-sans);
 }

@@ -11,7 +11,10 @@ VI: Kiểm tra tính năng đoán nhánh (xác nhận node cha) và luồng hoà
     (Attempt + apps.reviews), nên ChatSession không có hint_count mà ghi ở Attempt.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.chat import branching, services, steps
@@ -237,6 +240,106 @@ class CompletionFlowTestCase(TestCase):
         )
         free_session.refresh_from_db()
         self.assertEqual(free_session.title, first_title)
+
+    def test_db_rejects_second_active_attempt_for_same_session(self):
+        """
+        JA: 【回帰】完了ボタンの二重押下対策の土台となるDB制約そのものを検証する。
+            1セッションにつき「未完了(completed_at IS NULL)」のAttemptは同時に
+            1件までしか存在できないこと。
+        VI: 【Hồi quy】Kiểm tra trực tiếp ràng buộc DB làm nền tảng cho việc chống
+            bấm nút hoàn thành 2 lần. Mỗi session chỉ được có tối đa 1 Attempt
+            "chưa hoàn thành" (completed_at IS NULL) tại một thời điểm.
+        """
+        Attempt.objects.create(chat_session=self.session)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Attempt.objects.create(chat_session=self.session)
+
+    def test_double_complete_free_chat_discards_orphan_node(self):
+        """
+        JA: 【回帰】学習完了ボタンの二重押下(2つのリクエストがほぼ同時に、まだ
+            knowledge_nodeが紐付いていない古いsessionの状態を見た状況)を、
+            同じDB行を独立に読んだ2つのPythonオブジェクトで再現する。
+            2回目は自分が作ったノードを孤立させず破棄し、1回目が作った
+            ノードをそのまま返すこと(=知識ノードが重複しない)。
+        VI: 【Hồi quy】Mô phỏng bấm nút hoàn thành học 2 lần liên tiếp (2 request
+            gần như đồng thời, cùng thấy session chưa gắn knowledge_node) bằng
+            2 đối tượng Python đọc độc lập cùng 1 dòng DB. Lần gọi thứ 2 phải tự
+            hủy node mình vừa tạo (không để mồ côi) và trả về node mà lần gọi
+            thứ nhất đã tạo (không bị nhân đôi knowledge node).
+        """
+        free_session = services.create_chat_session_for_node(user=self.user)
+        # JA: 2つの「リクエスト」がそれぞれ独立に取得したsessionを模す。
+        #     どちらも knowledge_node=None の古い状態のまま。
+        # VI: Mô phỏng 2 "request" mỗi bên tự lấy session độc lập.
+        #     Cả 2 đều đang giữ trạng thái cũ knowledge_node=None.
+        request_a_session = ChatSession.objects.get(id=free_session.id)
+        request_b_session = ChatSession.objects.get(id=free_session.id)
+
+        winner_node = services.create_knowledge_node_from_session(
+            session=request_a_session, user=self.user, topic_id=self.topic.id
+        )
+        result_node = services.create_knowledge_node_from_session(
+            session=request_b_session, user=self.user, topic_id=self.topic.id
+        )
+
+        self.assertEqual(result_node.id, winner_node.id)
+        # JA: setUpで作った self.node ("三平方") とは別に、この free_session からは
+        #     ちょうど1件だけ知識ノードが生まれていること(=孤立ノードが残っていない)。
+        # VI: Ngoài self.node ("三平方") tạo ở setUp, từ free_session này phải sinh ra
+        #     đúng 1 knowledge node (không còn node mồ côi nào sót lại).
+        self.assertEqual(
+            KnowledgeNode.objects.filter(topic=self.topic).exclude(id=self.node.id).count(), 1
+        )
+        free_session.refresh_from_db()
+        self.assertEqual(free_session.knowledge_node_id, winner_node.id)
+
+    def test_claim_attempt_for_action_grants_completion_to_only_one_caller(self):
+        """
+        JA: 【回帰】2つのリクエストが同じ未完了Attemptに合流した状況
+            (get_or_create_active_attemptが同じAttemptを返すケース)を再現し、
+            claim_attempt_for_actionの「完了権」(won_completion)が片方にしか
+            与えられないこと。send_message_and_get_ai_response側はこのフラグを
+            見てからでないとSM-2(record_review_result)を呼ばないため、これが
+            成り立てば二重適用は起きない。
+        VI: 【Hồi quy】Mô phỏng 2 request cùng hội tụ về 1 Attempt chưa hoàn thành
+            (trường hợp get_or_create_active_attempt trả về cùng 1 Attempt), và
+            kiểm tra "quyền hoàn thành" (won_completion) của claim_attempt_for_action
+            chỉ được cấp cho đúng 1 trong 2. send_message_and_get_ai_response chỉ gọi
+            SM-2 (record_review_result) khi cờ này đúng, nên nếu điều này đúng thì
+            không có chuyện áp dụng 2 lần.
+        """
+        attempt = Attempt.objects.create(chat_session=self.session)
+
+        with patch.object(services, "get_or_create_active_attempt", return_value=attempt):
+            _, won_first = services.claim_attempt_for_action(
+                session=self.session, action_type="COMPLETE"
+            )
+            _, won_second = services.claim_attempt_for_action(
+                session=self.session, action_type="COMPLETE"
+            )
+
+        self.assertTrue(won_first)
+        self.assertFalse(won_second)
+        attempt.refresh_from_db()
+        self.assertIsNotNone(attempt.completed_at)
+
+    def test_won_completion_gate_prevents_double_sm2_end_to_end(self):
+        """
+        JA: 【回帰】send_message_and_get_ai_responseを通しで呼び、claim_attempt_for_action
+            が返すwon_completionがFalseの時にrecord_review_resultが呼ばれない
+            (=ReviewLogが増えない)ことをエンドツーエンドで確認する。
+        VI: 【Hồi quy】Gọi xuyên suốt send_message_and_get_ai_response, xác nhận
+            record_review_result KHÔNG được gọi (ReviewLog không tăng) khi
+            claim_attempt_for_action trả về won_completion=False.
+        """
+        attempt = Attempt.objects.create(chat_session=self.session)
+
+        with patch.object(services, "claim_attempt_for_action", return_value=(attempt, False)):
+            services.send_message_and_get_ai_response(
+                session=self.session, user_message_text="", action_type="COMPLETE", understood=True
+            )
+
+        self.assertEqual(ReviewLog.objects.filter(attempt=attempt).count(), 0)
 
 
 class BigramBranchingTestCase(TestCase):

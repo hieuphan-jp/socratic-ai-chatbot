@@ -8,6 +8,8 @@
  */
 import { Leaf } from 'lucide-react'
 
+import { useI18n } from '@/shared/i18n'
+
 interface RetentionSummaryProps {
   percent: number
   notDue: number
@@ -15,6 +17,8 @@ interface RetentionSummaryProps {
 }
 
 export function RetentionSummary({ percent, notDue, total }: RetentionSummaryProps) {
+  const { t } = useI18n()
+
   return (
     <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 px-5 py-4">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
@@ -26,7 +30,7 @@ export function RetentionSummary({ percent, notDue, total }: RetentionSummaryPro
             {total === 0 ? '—' : `${percent}%`}
           </span>
           <span className="text-xs text-slate-500">
-            定着中のノード / Node đã ghi nhớ ({notDue}/{total})
+            {t('learningTree.retention.label', { notDue, total })}
           </span>
         </div>
         <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-emerald-100/80">

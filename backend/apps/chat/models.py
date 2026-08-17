@@ -42,6 +42,27 @@ class Attempt(BaseModel):
 
     class Meta:
         ordering = ["-created_at"]
+        # JA: 【設計変更 2026-08-17】1セッションにつき「未完了のAttempt」は同時に
+        #     1件までに制限する部分ユニーク制約。完了ボタンの二重押下(ほぼ同時に
+        #     2リクエストが飛ぶ)で、どちらも「未完了のAttemptが無い」と判定して
+        #     Attemptを2件作ってしまい、SM-2の復習記録が二重に適用される不具合が
+        #     あった。DBレベルで弾くことで、アプリ側のタイミングに関係なく防ぐ
+        #     (services.get_or_create_active_attemptがIntegrityErrorを拾って
+        #     既存の1件に合流する)。
+        # VI: 【Thay đổi thiết kế 2026-08-17】Ràng buộc unique một phần: mỗi session
+        #     chỉ được có tối đa 1 Attempt "chưa hoàn thành" tại một thời điểm.
+        #     Bấm nút hoàn thành 2 lần liên tiếp (gần như đồng thời) khiến cả 2
+        #     request đều thấy "chưa có Attempt đang mở" nên tạo ra 2 Attempt,
+        #     làm SM-2 ghi nhận ôn tập bị áp dụng 2 lần. Chặn ở mức DB để không
+        #     phụ thuộc vào thời điểm ở phía app (services.get_or_create_active_attempt
+        #     bắt IntegrityError rồi dùng chung Attempt đã có).
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chat_session"],
+                condition=models.Q(completed_at__isnull=True),
+                name="unique_active_attempt_per_session",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"Attempt(session={self.chat_session_id}) hints={self.hint_count}"

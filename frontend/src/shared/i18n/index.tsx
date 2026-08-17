@@ -24,7 +24,7 @@ import type { Locale } from './locale'
 import { messages } from './messages'
 import type { MessageKey } from './messages'
 
-export { LOCALES, LOCALE_LABELS, DEFAULT_LOCALE } from './locale'
+export { LOCALES, LOCALE_LABELS, LOCALE_TO_INTL, DEFAULT_LOCALE } from './locale'
 export type { Locale } from './locale'
 export type { MessageKey } from './messages'
 

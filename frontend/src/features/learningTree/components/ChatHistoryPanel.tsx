@@ -14,6 +14,7 @@
  *     dần) dạng view chỉ đọc, tối giản (không import chéo feature nên không
  *     dùng lại component của hintChat).
  */
+import { useI18n } from '@/shared/i18n'
 import { ErrorText, Notice } from '@/shared/ui'
 
 import { useChatSessionMessages } from '../api/hooks'
@@ -23,11 +24,12 @@ interface ChatHistoryPanelProps {
 }
 
 export function ChatHistoryPanel({ sessionId }: ChatHistoryPanelProps) {
+  const { t } = useI18n()
   const { data, isPending, isError, error } = useChatSessionMessages(sessionId)
 
-  if (isPending) return <Notice>読み込み中… / Đang tải…</Notice>
+  if (isPending) return <Notice>{t('common.loading')}</Notice>
   if (isError) return <ErrorText>{(error as Error).message}</ErrorText>
-  if (data.length === 0) return <Notice>会話履歴がありません / Chưa có lịch sử hội thoại</Notice>
+  if (data.length === 0) return <Notice>{t('learningTree.chatHistory.empty')}</Notice>
 
   return (
     <div className="space-y-2.5">
@@ -36,8 +38,9 @@ export function ChatHistoryPanel({ sessionId }: ChatHistoryPanelProps) {
         return (
           <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
             <div
+              // ★teal-700。白文字コントラストがWCAG AA未達(3.66:1)だったteal-600から変更(Button.tsx参照)。
               className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                isUser ? 'bg-teal-600 text-white' : 'border border-slate-100 bg-slate-50 text-slate-700'
+                isUser ? 'bg-teal-700 text-white' : 'border border-slate-100 bg-slate-50 text-slate-700'
               }`}
             >
               {message.message_text}

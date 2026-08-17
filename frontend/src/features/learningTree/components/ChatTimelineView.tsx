@@ -28,12 +28,17 @@ import { useState } from 'react'
 import { MessageCircle, MessagesSquare, Play } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
+import { LOCALE_TO_INTL, useI18n } from '@/shared/i18n'
 import { ErrorText } from '@/shared/ui'
 
 import { useAllChatSessions } from '../api/hooks'
 import { ChatHistoryPanel } from './ChatHistoryPanel'
 
-function formatSessionDate(isoString: string): string {
+function formatSessionDate(
+  isoString: string,
+  intlLocale: string,
+  t: (key: 'learningTree.timeline.today' | 'learningTree.timeline.yesterday', params: { time: string }) => string
+): string {
   const date = new Date(isoString)
   const now = new Date()
   const isSameDay = date.toDateString() === now.toDateString()
@@ -41,28 +46,30 @@ function formatSessionDate(isoString: string): string {
   yesterday.setDate(now.getDate() - 1)
   const isYesterday = date.toDateString() === yesterday.toDateString()
 
-  const time = date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-  if (isSameDay) return `今日 ${time} / Hôm nay`
-  if (isYesterday) return `昨日 ${time} / Hôm qua`
-  return `${date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} ${time}`
+  const time = date.toLocaleTimeString(intlLocale, { hour: '2-digit', minute: '2-digit' })
+  if (isSameDay) return t('learningTree.timeline.today', { time })
+  if (isYesterday) return t('learningTree.timeline.yesterday', { time })
+  return `${date.toLocaleDateString(intlLocale, { month: 'short', day: 'numeric' })} ${time}`
 }
 
 export function ChatTimelineView() {
+  const { t, locale } = useI18n()
   const { data: sessions, isPending, isError, error } = useAllChatSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const navigate = useNavigate()
 
-  if (isPending) return <p className="text-sm text-slate-400">読み込み中… / Đang tải…</p>
+  if (isPending) return <p className="text-sm text-slate-400">{t('common.loading')}</p>
   if (isError) return <ErrorText>{(error as Error).message}</ErrorText>
 
   const selectedSession = sessions.find((s) => String(s.id) === selectedSessionId)
+  const intlLocale = LOCALE_TO_INTL[locale]
 
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
       <div className="space-y-1 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
         {sessions.length === 0 ? (
           <p className="px-2 py-6 text-center text-sm text-slate-400">
-            まだ会話がありません / Chưa có hội thoại
+            {t('learningTree.timeline.empty')}
           </p>
         ) : (
           sessions.map((session) => {
@@ -82,7 +89,7 @@ export function ChatTimelineView() {
                 <div className="min-w-0">
                   <p className="truncate font-medium">{session.title}</p>
                   <p className={`text-[11px] ${isSelected ? 'text-teal-600' : 'text-slate-400'}`}>
-                    {formatSessionDate(session.created_at)}
+                    {formatSessionDate(session.created_at, intlLocale, t)}
                   </p>
                 </div>
               </button>
@@ -101,12 +108,13 @@ export function ChatTimelineView() {
               <button
                 type="button"
                 onClick={() => navigate(`/hint-chat/${selectedSession.id}`)}
-                className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-teal-600 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-700"
+                // ★teal-700。白文字コントラストがWCAG AA未達(3.66:1)だったteal-600から変更(Button.tsx参照)。
+                className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-teal-700 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-800"
               >
                 <Play className="h-3 w-3" />
                 {selectedSession.knowledge_node
-                  ? '復習を始める / Bắt đầu ôn tập'
-                  : '学習を再開する / Tiếp tục học'}
+                  ? t('learningTree.review.start')
+                  : t('learningTree.review.resume')}
               </button>
             </div>
             <ChatHistoryPanel sessionId={String(selectedSession.id)} />
@@ -114,9 +122,7 @@ export function ChatTimelineView() {
         ) : (
           <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 text-slate-300">
             <MessagesSquare className="h-8 w-8" />
-            <p className="text-sm text-slate-400">
-              左の一覧から会話を選んでください / Chọn một hội thoại ở danh sách bên trái
-            </p>
+            <p className="text-sm text-slate-400">{t('learningTree.timeline.selectPrompt')}</p>
           </div>
         )}
       </div>

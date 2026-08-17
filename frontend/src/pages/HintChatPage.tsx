@@ -14,22 +14,40 @@
 import { Link, useParams } from 'react-router-dom'
 
 import { HintChatView } from '@/features/hintChat/components/HintChatView'
+import { useI18n } from '@/shared/i18n'
+import { PageContainer, PageHeader } from '@/shared/ui'
+
+// JA: ヘッダーの2つのリンクは画面遷移なので Link のまま。見た目だけ Button の
+//     ghost/sm に揃える(学習内容ツリー画面のヘッダーとも共通)。
+// VI: 2 link ở header là điều hướng, không phải hành động, nên giữ Link. Chỉ
+//     đồng bộ hình thức với ghost/sm của Button (dùng chung với header cây học tập).
+const HEADER_LINK_CLASS =
+  'inline-flex shrink-0 items-center rounded-xl px-3 py-1.5 text-sm font-medium text-slate-500 no-underline transition-colors hover:bg-slate-100 hover:text-slate-700'
 
 export function HintChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const { t } = useI18n()
 
   return (
-    <main style={{ maxWidth: '1200px', width: '100%', margin: '20px auto', padding: '0 20px', display: 'grid', gap: 20, boxSizing: 'border-box' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 20, fontWeight: 'bold' }}>ヒントチャット / Chat gợi ý</h1>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <Link to="/learning-tree" style={{ color: '#4f46e5', textDecoration: 'underline' }}>
-            学習内容ツリー / Cây nội dung
-          </Link>
-          <Link to="/" style={{ color: '#4f46e5', textDecoration: 'underline' }}>戻る / Quay lại</Link>
-        </div>
-      </header>
-      <HintChatView key={sessionId ?? 'new'} activeSessionId={sessionId} />
-    </main>
+    <>
+      <PageHeader
+        title={t('hintChat.title')}
+        subtitle={t('hintChat.subtitle')}
+        width="wide"
+        actions={
+          <>
+            <Link to="/learning-tree" className={HEADER_LINK_CLASS}>
+              {t('learningTree.title')}
+            </Link>
+            <Link to="/" className={HEADER_LINK_CLASS}>
+              {t('common.back')}
+            </Link>
+          </>
+        }
+      />
+      <PageContainer width="wide">
+        <HintChatView key={sessionId ?? 'new'} activeSessionId={sessionId} />
+      </PageContainer>
+    </>
   )
 }

@@ -15,25 +15,21 @@
 import type { ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/cn'
-
-type Width = 'narrow' | 'normal' | 'wide'
-
-const WIDTHS: Record<Width, string> = {
-  narrow: 'max-w-md',
-  normal: 'max-w-4xl',
-  wide: 'max-w-7xl',
-}
+import { CONTAINER_WIDTHS } from './containerWidths'
+import type { ContainerWidth } from './containerWidths'
 
 export function PageContainer({
   width = 'normal',
   children,
   className,
 }: {
-  width?: Width
+  width?: ContainerWidth
   children: ReactNode
   className?: string
 }) {
   return (
-    <main className={cn('mx-auto space-y-6 p-4 sm:p-6', WIDTHS[width], className)}>{children}</main>
+    <main className={cn('mx-auto space-y-6 p-4 sm:p-6', CONTAINER_WIDTHS[width], className)}>
+      {children}
+    </main>
   )
 }

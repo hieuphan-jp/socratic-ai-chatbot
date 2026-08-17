@@ -13,6 +13,7 @@
  */
 import { Handle, Position } from '@xyflow/react'
 
+import { useI18n } from '@/shared/i18n'
 import { Leaf } from '@/shared/ui/Leaf'
 import type { StepKind } from '@/shared/types'
 
@@ -25,6 +26,7 @@ type StepLeafData = {
 }
 
 export function StepLeafNode({ data }: { data: StepLeafData }) {
+  const { t } = useI18n()
   const isBranch = data.step_kind === 'BRANCH'
 
   return (
@@ -50,7 +52,7 @@ export function StepLeafNode({ data }: { data: StepLeafData }) {
       {!data.parent_confirmed && (
         <span
           className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white"
-          title="親ステップの確認待ち / Đang chờ xác nhận node cha"
+          title={t('hintChat.step.pendingParent')}
         />
       )}
     </div>

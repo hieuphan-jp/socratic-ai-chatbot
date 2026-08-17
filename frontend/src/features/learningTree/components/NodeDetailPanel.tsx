@@ -28,6 +28,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { BookOpen, Calendar, Clock, MessageSquare, Play, X } from 'lucide-react'
 
+import { LOCALE_TO_INTL, useI18n } from '@/shared/i18n'
 import { ErrorText } from '@/shared/ui'
 import type { ReviewSchedule } from '@/shared/types'
 
@@ -43,6 +44,7 @@ interface NodeDetailPanelProps {
 type Tab = 'detail' | 'chatHistory'
 
 export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelProps) {
+  const { t, locale } = useI18n()
   const { data, isPending, isError, error } = useKnowledgeNodeDetail(nodeId)
   const [tab, setTab] = useState<Tab>('detail')
   const chatSessionId = schedule?.chat_session_id ?? null
@@ -64,13 +66,13 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <div className="flex items-center gap-2 text-slate-700">
           <BookOpen className="h-4 w-4 text-teal-600" />
-          <h3 className="text-sm font-semibold">ノードの詳細 / Chi tiết node</h3>
+          <h3 className="text-sm font-semibold">{t('learningTree.node.detail')}</h3>
         </div>
         <button
           type="button"
           onClick={onClose}
           className="rounded-lg border-0 bg-transparent p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-          aria-label="閉じる / Đóng"
+          aria-label={t('common.close')}
         >
           <X className="h-4 w-4" />
         </button>
@@ -87,7 +89,7 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
                 : 'border-transparent text-slate-400 hover:text-slate-600'
             }`}
           >
-            詳細 / Chi tiết
+            {t('learningTree.node.tab.detail')}
           </button>
           <button
             type="button"
@@ -99,7 +101,7 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
             }`}
           >
             <MessageSquare className="h-3 w-3" />
-            会話ログ / Lịch sử hội thoại
+            {t('learningTree.node.tab.chatHistory')}
           </button>
         </div>
       )}
@@ -109,7 +111,7 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
           <ChatHistoryPanel sessionId={chatSessionId} />
         ) : (
           <>
-            {isPending && <p className="text-sm text-slate-400">読み込み中… / Đang tải…</p>}
+            {isPending && <p className="text-sm text-slate-400">{t('common.loading')}</p>}
             {isError && <ErrorText>{(error as Error).message}</ErrorText>}
 
             {data && (
@@ -128,20 +130,27 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
                       <div className="flex items-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5" />
                         <span>
-                          定着度 / Độ ghi nhớ: {schedule.mastery_level} / {schedule.mastery_max_level}
+                          {t('learningTree.node.masteryLabel', {
+                            level: schedule.mastery_level,
+                            max: schedule.mastery_max_level,
+                          })}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5" />
                         <span>
                           {schedule.is_due
-                            ? `復習の時期です(${schedule.days_overdue}日超過) / Đã tới hạn ôn (quá ${schedule.days_overdue} ngày)`
-                            : `次回復習予定 / Lần ôn kế tiếp: ${new Date(schedule.next_review_at).toLocaleDateString('ja-JP')}`}
+                            ? t('learningTree.node.dueOverdue', { days: schedule.days_overdue })
+                            : t('learningTree.node.nextReview', {
+                                date: new Date(schedule.next_review_at).toLocaleDateString(
+                                  LOCALE_TO_INTL[locale]
+                                ),
+                              })}
                         </span>
                       </div>
                     </>
                   ) : (
-                    <p>未学習(まだ復習記録がありません) / Chưa học (chưa có bản ghi ôn tập)</p>
+                    <p>{t('learningTree.node.unlearned')}</p>
                   )}
                 </div>
               </>
@@ -157,14 +166,15 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
           type="button"
           onClick={handleStartReview}
           disabled={startReview.isPending}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          // ★teal-700。白文字コントラストがWCAG AA未達(3.66:1)だったteal-600から変更(Button.tsx参照)。
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-teal-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           <Play className="h-3.5 w-3.5" />
           {startReview.isPending
-            ? '開いています… / Đang mở…'
+            ? t('learningTree.review.opening')
             : chatSessionId
-              ? '復習を始める / Bắt đầu ôn tập'
-              : 'チャットで学習を始める / Bắt đầu học bằng chat'}
+              ? t('learningTree.review.start')
+              : t('learningTree.review.startFromChat')}
         </button>
         {startReview.isError && (
           <div className="mt-2">

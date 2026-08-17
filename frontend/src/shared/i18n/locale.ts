@@ -22,6 +22,16 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   en: 'English',
 }
 
+// JA: Date#toLocaleDateString 等に渡すIntlロケール文字列。日付・時刻の書式
+//     (年月日の順番、区切り文字)も選択言語に揃えるために使う。
+// VI: Chuỗi locale của Intl để truyền vào Date#toLocaleDateString v.v. Dùng để
+//     định dạng ngày/giờ (thứ tự năm-tháng-ngày, dấu phân cách) khớp với ngôn ngữ đang chọn.
+export const LOCALE_TO_INTL: Record<Locale, string> = {
+  ja: 'ja-JP',
+  vi: 'vi-VN',
+  en: 'en-US',
+}
+
 const STORAGE_KEY = 'app.locale'
 
 function isLocale(value: unknown): value is Locale {

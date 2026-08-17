@@ -15,11 +15,13 @@ import { useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 
 import { useReviewSchedules } from '@/features/reviews/api/hooks'
+import { useI18n } from '@/shared/i18n'
 import { ErrorText } from '@/shared/ui'
 import type { TreeNode } from '@/shared/types'
 
 import { useLearningTree } from '../api/hooks'
 import { computeRetentionPercent, indexSchedulesByNodeId } from '../lib/mastery'
+import { findAncestorTopicIds } from '../lib/treeFocus'
 import { NodeDetailPanel } from './NodeDetailPanel'
 import { RetentionSummary } from './RetentionSummary'
 import { TopicBranch } from './TopicBranch'
@@ -41,6 +43,7 @@ function filterTree(nodes: TreeNode[], keyword: string): TreeNode[] {
 }
 
 export function LearningTreeView() {
+  const { t } = useI18n()
   const [keyword, setKeyword] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
 
@@ -55,12 +58,22 @@ export function LearningTreeView() {
     () => (tree.data ? filterTree(tree.data, keyword) : []),
     [tree.data, keyword]
   )
+  // JA: ★フォーカスモード用。選択中の葉への経路(祖先Topic)だけを求め、それ以外の
+  //     枝をTopicBranch側で暗く・折りたたむための材料にする。選択が無ければnull
+  //     (フォーカス無効=従来通りの表示)。
+  // VI: ★Dùng cho chế độ focus. Chỉ tìm đường dẫn (Topic tổ tiên) tới lá đang chọn,
+  //     làm nguyên liệu để TopicBranch làm mờ/gấp các nhánh còn lại. Không có lựa
+  //     chọn thì null (tắt chế độ focus, hiển thị như bình thường).
+  const focusedTopicIds = useMemo(
+    () => (selectedNodeId ? findAncestorTopicIds(filtered, selectedNodeId) : null),
+    [filtered, selectedNodeId]
+  )
   const retention = useMemo(
     () => computeRetentionPercent(tree.data ?? [], scheduleByNodeId),
     [tree.data, scheduleByNodeId]
   )
 
-  if (tree.isPending) return <p className="text-sm text-slate-400">読み込み中… / Đang tải…</p>
+  if (tree.isPending) return <p className="text-sm text-slate-400">{t('common.loading')}</p>
   if (tree.isError) return <ErrorText>{(tree.error as Error).message}</ErrorText>
 
   return (
@@ -77,7 +90,7 @@ export function LearningTreeView() {
           type="text"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          placeholder="キーワードで検索 / Tìm theo từ khóa"
+          placeholder={t('common.search')}
           className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pr-4 pl-10 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
         />
       </div>
@@ -85,9 +98,7 @@ export function LearningTreeView() {
       <div className={`grid gap-4 ${selectedNodeId ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
         <div className="space-y-1 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           {filtered.length === 0 ? (
-            <p className="px-2 py-6 text-center text-sm text-slate-400">
-              該当なし / Không tìm thấy
-            </p>
+            <p className="px-2 py-6 text-center text-sm text-slate-400">{t('common.notFound')}</p>
           ) : (
             filtered.map((topic) => (
               <TopicBranch
@@ -97,6 +108,7 @@ export function LearningTreeView() {
                 selectedNodeId={selectedNodeId}
                 onSelectNode={setSelectedNodeId}
                 defaultOpen={keyword.trim().length > 0}
+                focusedTopicIds={focusedTopicIds}
               />
             ))
           )}

@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.ai.base import ChatMessage as AIChatMessage
@@ -28,7 +29,33 @@ logger = logging.getLogger(__name__)
 
 # JA: ★家庭教師としての役割をより明確に指示。ヒントを段階的に導き、直接の答えは出さない。
 # VI: ★Chỉ thị rõ ràng hơn vai trò gia sư. Dẫn dắt bằng gợi ý từng bước, không đưa thẳng đáp án.
-SYSTEM_PROMPT = """
+# JA: ★数式の書き方に関する共通ルール。チャット画面はプレーンテキスト表示
+#     (LaTeX/Markdownのレンダラーを持たない)なので、AIが $$ax^2+bx+c=0$$ や
+#     \neq のようなLaTeX記法をそのまま返すと、画面には未レンダリングの記号列が
+#     並んで表示され、ユーザーには「文字化け」に見えてしまう(実際に日本語の
+#     数式トピックで報告された不具合)。加えて、STEP_ANALYSIS_SYSTEM_PROMPT の
+#     ようにJSON形式での応答を要求している場面では、\neq や \frac のバックスラッシュが
+#     有効なJSONエスケープ(\n, \t 等)ではないため、AIの応答をjson.loadsする際に
+#     パース失敗を誘発することもある。3つのシステムプロンプト全てに共通で
+#     差し込むことで、両方の問題を根元で防ぐ。
+# VI: ★Quy tắc chung về cách viết công thức toán. Màn hình chat hiển thị dạng
+#     plain text (không có renderer LaTeX/Markdown), nên nếu AI trả nguyên văn
+#     ký hiệu LaTeX như $$ax^2+bx+c=0$$ hay \neq, màn hình sẽ hiện chuỗi ký hiệu
+#     chưa render, người dùng nhìn như "lỗi phông chữ" (đã bị báo cáo với chủ đề
+#     công thức tiếng Nhật). Ngoài ra, ở nơi yêu cầu trả lời dạng JSON như
+#     STEP_ANALYSIS_SYSTEM_PROMPT, dấu backslash trong \neq hay \frac không phải
+#     escape hợp lệ của JSON (\n, \t...) nên có thể khiến json.loads parse lỗi.
+#     Chèn chung vào cả 3 system prompt để chặn cả 2 vấn đề từ gốc.
+MATH_NOTATION_RULE = """
+MATH NOTATION RULE (applies no matter what language you reply in):
+- NEVER use LaTeX or Markdown math syntax: no $...$, no $$...$$, no \\( \\) or \\[ \\], no backslash
+  commands like \\frac, \\sqrt, \\neq, \\leq, \\geq, \\times, \\cdot, \\pi, and no code blocks for formulas.
+- Write formulas as plain, readable text using normal Unicode characters instead:
+  x², √2, π, ×, ÷, ≠, ≤, ≥, °, a₁, ½, etc.
+- Example: write "ax² + bx + c = 0" (not "$$ax^2 + bx + c = 0$$"), and "a ≠ 0" (not "$a \\neq 0$").
+"""
+
+SYSTEM_PROMPT = f"""
 You are an AI Tutor helping a student learn step by step.
 
 STRICT RULES:
@@ -39,7 +66,7 @@ STRICT RULES:
 5. You have access to the full conversation history below (previous questions and your previous replies).
    Use it to stay consistent and to correctly recall anything the user or you mentioned earlier.
 6. Keep responses concise (a few sentences), conversational, and encouraging.
-"""
+{MATH_NOTATION_RULE}"""
 
 # JA: ★ステップ判定用のシステムプロンプト。
 #     【設計変更 2026-08-16】以前は「直前(N-1)の続きか、N-2以前への出戻りか」だけを判定させ、
@@ -58,6 +85,17 @@ STRICT RULES:
 STEP_ANALYSIS_SYSTEM_PROMPT = """
 あなたは学習者を指導する AI Tutor です。
 ユーザーの質問にヒントで答えると同時に、その質問を「学習の思考ツリー」のどこに置くべきかを判定してください。
+
+【数式の書き方 / Quy tắc viết công thức】
+- $...$ や $$...$$、\\( \\) \\[ \\]、\\frac, \\sqrt, \\neq, \\leq, \\geq, \\times, \\cdot, \\pi のような
+  LaTeX/Markdown記法は絶対に使わないこと(画面はプレーンテキスト表示で、記号がそのまま
+  未変換のまま表示されてしまうため)。
+- 代わりに、読みやすい通常のUnicode文字で書くこと: x², √2, π, ×, ÷, ≠, ≤, ≥, ° など。
+  例)「$$ax^2+bx+c=0$$」ではなく「ax² + bx + c = 0」、「$a \\neq 0$」ではなく「a ≠ 0」。
+- Không được dùng ký hiệu LaTeX/Markdown như $...$, $$...$$, \\( \\) \\[ \\], \\frac, \\sqrt,
+  \\neq, \\leq, \\geq, \\times, \\cdot, \\pi (vì màn hình hiển thị dạng plain text, ký hiệu
+  sẽ hiện nguyên văn chưa được render).
+- Thay vào đó hãy viết bằng ký tự Unicode thông thường, dễ đọc: x², √2, π, ×, ÷, ≠, ≤, ≥, °...
 
 【判定ルール / Quy tắc phán đoán】
 - is_new_step = true（幹：新しい大きなステップ）
@@ -90,7 +128,8 @@ STEP_ANALYSIS_SYSTEM_PROMPT = """
 #     知識ノードのtitle/contentをAIに要約させるための指示。
 # VI: ★Chỉ thị để AI tóm tắt nội dung hội thoại thành title/content của
 #     knowledge node, khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn thành".
-NODE_SUMMARY_SYSTEM_PROMPT = """
+NODE_SUMMARY_SYSTEM_PROMPT = (
+    """
 You are summarizing a tutoring conversation into a permanent study note for the student.
 
 Based on the conversation so far, write a concise study note capturing what the student learned.
@@ -101,6 +140,8 @@ OUTPUT FORMAT (STRICT):
 
 Do not include any preamble, meta-commentary, or markdown formatting.
 """
+    + MATH_NOTATION_RULE
+)
 
 NEEDS_AI_ANSWER = {"ANSWER", "REQUEST_CHANGE_METHOD"}
 SESSION_NODE_TITLE_MAX_LEN = 255
@@ -548,6 +589,26 @@ def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
         (tên mặc định của frontend) trên nhật ký thời gian. Quy tắc đặt tên
         đã gom về _session_title_for_node nên sẽ ra cùng dạng "学習: <tên node>"
         như session bắt đầu ôn tập từ cây.
+        ★【設計変更 2026-08-17】完了ボタンの二重押下で2つのリクエストがほぼ同時に
+        ここへ来ると、どちらも「session.knowledge_node_id はまだNone」という
+        古い状態を見て、それぞれ別々にAIへ要約させ、別々のKnowledgeNodeを作って
+        いた(呼び出し元のガードは呼び出し時点のsessionを見るだけで、実際に
+        書き込む瞬間の状態は見ていないため)。結果、同じ会話から生まれた
+        タイトルが同じノードが2つでき、片方だけがsessionに紐付いて、もう片方は
+        どこからも辿れない「空っぽに見えるノード」として残ってしまっていた。
+        ここを「knowledge_nodeがまだNoneの行にだけ書き込む」条件付きUPDATEに
+        することで、後から来たリクエストは自分が作ったノードを破棄して、
+        先に勝った方のノードをそのまま返すようにする。
+    VI: Được gọi khi một phiên chat tự do (chưa gắn knowledge_node) "hoàn
+        ★【Thay đổi thiết kế 2026-08-17】Khi bấm nút hoàn thành 2 lần liên tiếp,
+        2 request gần như đồng thời tới đây đều thấy "session.knowledge_node_id
+        vẫn còn None" (trạng thái cũ, vì điều kiện chặn ở nơi gọi chỉ xét session
+        tại thời điểm gọi, không xét trạng thái thật lúc ghi), nên mỗi request tự
+        nhờ AI tóm tắt riêng và tạo ra 2 KnowledgeNode khác nhau. Kết quả: 2 node
+        cùng tên (từ cùng 1 hội thoại), chỉ 1 node được gắn vào session, node còn
+        lại "trông như rỗng" vì không ai trỏ tới nó nữa. Đổi sang UPDATE có điều
+        kiện (chỉ ghi vào dòng mà knowledge_node vẫn đang None) để request tới sau
+        tự hủy node mình vừa tạo và trả về node của request đã thắng trước đó.
     """
     from apps.topics import services as topics_services
 
@@ -557,37 +618,122 @@ def create_knowledge_node_from_session(*, session: ChatSession, user, topic_id):
         user=user, topic=topic, title=title, content=content
     )
 
+    # JA: 「knowledge_nodeがまだNoneの行にだけ」書き込む条件付きUPDATE。
+    #     このUPDATE文自体はDBが1回で処理するため、二重押下で2リクエストが
+    #     同時に来ても、書き込みに成功するのはどちらか一方だけになる。
+    # VI: UPDATE có điều kiện "chỉ ghi vào dòng mà knowledge_node vẫn còn None".
+    #     Bản thân câu UPDATE được DB xử lý trong 1 lần, nên dù 2 request tới
+    #     cùng lúc do bấm 2 lần, chỉ 1 trong 2 ghi thành công.
+    claimed = ChatSession.objects.filter(id=session.id, knowledge_node__isnull=True).update(
+        knowledge_node=node, title=_session_title_for_node(node)
+    )
+    if claimed == 0:
+        # JA: 先に別のリクエストが確定させていた。自分が作ったノードは孤立するので
+        #     削除し、既に確定している方のノードを返す(=見かけ上は何も起きない)。
+        # VI: Request khác đã chốt trước rồi. Node mình vừa tạo sẽ mồ côi nên xóa đi,
+        #     trả về node đã được chốt trước đó (nhìn bên ngoài như không có gì xảy ra).
+        logger.warning(
+            "[complete] knowledge_node重複作成を検出、孤立ノードを破棄: session=%s discarded_node=%s",
+            session.id,
+            node.id,
+        )
+        node.delete()
+        session.refresh_from_db(fields=["knowledge_node", "title"])
+        return session.knowledge_node
+
     session.knowledge_node = node
     session.title = _session_title_for_node(node)
-    session.save(update_fields=["knowledge_node", "title"])
     return node
 
 
 def get_or_create_active_attempt(*, session: ChatSession) -> Attempt:
-    attempt = session.attempts.filter(completed_at__isnull=True).order_by("-created_at").first()
-    if attempt is None:
-        attempt = Attempt.objects.create(chat_session=session)
-    return attempt
+    """
+    JA: ★【設計変更 2026-08-17】完了/ヒントボタンの二重押下で2リクエストがほぼ同時に
+        来ると、どちらも「未完了のAttemptが無い」と判定して別々にAttemptを
+        作ってしまっていた。Attemptモデルに追加した部分ユニーク制約
+        (1セッションにつき未完了Attemptは1件まで)がDBレベルでこれを弾くので、
+        後から来た方はIntegrityErrorを拾って、先に作られた1件に合流する。
+        ★【設計変更 2026-08-17 その2】当初は「まずSELECTで探し、無ければCREATE」
+        という順序だったが、これだと2リクエストが両方ともSELECTで「無い」と
+        見た直後にCREATEし、片方がIntegrityErrorになるまでの間に矛盾した状態が
+        生まれ得た(実機のPromise.all検証で、SQLiteは1文ごとにロックを取って
+        すぐ解放するため、SELECTとCREATEの間に相手の書き込みが割り込めることを
+        確認した)。SELECTを飛ばし、常にまずCREATEを試みてIntegrityErrorだけを
+        「既にある」の判定に使う形にすることで、判定と作成が1つのSQL文(INSERT)に
+        まとまり、割り込む隙が無くなる。
+    VI: ★【Thay đổi thiết kế 2026-08-17】Khi bấm nút hoàn thành/gợi ý 2 lần liên
+        tiếp, 2 request gần như đồng thời đều thấy "không có Attempt đang mở"
+        nên mỗi bên tự tạo 1 Attempt riêng. Ràng buộc unique một phần vừa thêm
+        vào model Attempt (mỗi session tối đa 1 Attempt chưa hoàn thành) chặn
+        điều này ở mức DB; request tới sau bắt IntegrityError rồi dùng chung
+        Attempt đã được tạo trước đó.
+        ★【Thay đổi thiết kế 2026-08-17, phần 2】Ban đầu thứ tự là "SELECT tìm trước,
+        không có thì CREATE", nhưng cách này để lại khe hở: cả 2 request đều SELECT
+        thấy "không có" rồi mới CREATE, và trong khoảng giữa đó bên kia có thể chen
+        vào (đã xác nhận bằng Promise.all trên server thật: SQLite khóa theo từng
+        câu lệnh rồi nhả ngay, nên giữa SELECT và CREATE có kẽ hở cho request kia ghi
+        vào). Bỏ SELECT, luôn thử CREATE trước và chỉ dùng IntegrityError để biết "đã
+        có rồi", gộp việc kiểm tra + tạo thành 1 câu SQL (INSERT) duy nhất, không còn
+        khe hở để chen vào.
+    """
+    try:
+        return Attempt.objects.create(chat_session=session)
+    except IntegrityError:
+        return session.attempts.get(completed_at__isnull=True)
 
 
-def record_hint_or_completion(
-    *, session: ChatSession, action_type: str, understood: bool | None = None
-):
+def claim_attempt_for_action(*, session: ChatSession, action_type: str) -> tuple[Attempt, bool]:
+    """
+    JA: ★【設計変更 2026-08-17】Attemptの確保と、COMPLETE時の「完了権」の確定だけを
+        行う。SM-2の適用(apps.reviews.services.record_review_result)はここでは
+        呼ばず、戻り値のwon_completionを見て呼び出し元が判断する。
+        なぜ分離したか: 当初はこの処理を「知識ノード作成(AI要約、数秒かかる)」の
+        後に呼んでいたが、二重押下で2リクエストがほぼ同時に来た場合、後続の
+        リクエストがここへ来る頃には先行リクエストが既にAttemptの作成・完了・
+        SM-2適用まで全部終えてしまっていることがあり(実際のrunserver上で
+        Promise.allを使った同時送信で再現・確認済み)、「未完了のAttemptが無い」
+        と正しく(しかし意図に反して)判断されて別のAttemptが新規作成され、
+        SM-2が二重に適用されていた。AI呼び出しより前に、かつ軽量なDB操作だけで
+        完結するこの部分を独立させることで、2リクエストの到達タイミングが近い
+        うちに競合を検出できる時間窓を最大化する。
+    VI: ★【Thay đổi thiết kế 2026-08-17】Chỉ đảm bảo có Attempt và chốt "quyền hoàn
+        thành" khi COMPLETE. KHÔNG gọi SM-2 (apps.reviews.services.record_review_result)
+        ở đây — bên gọi tự quyết định dựa vào won_completion trả về.
+        Vì sao tách ra: trước đây gọi bước này SAU khi tạo knowledge node (tóm tắt
+        bằng AI, mất vài giây); khi bấm 2 lần gần như đồng thời, tới lúc request
+        sau chạy tới đây thì request trước có thể đã tạo, hoàn thành Attempt và áp
+        dụng SM-2 xong xuôi rồi (đã tái hiện và xác nhận trên runserver thật bằng
+        Promise.all gửi đồng thời) — khiến request sau thấy đúng (nhưng sai ý định)
+        "không có Attempt đang mở" nên tạo Attempt mới và áp dụng SM-2 lần nữa.
+        Tách phần thao tác DB nhẹ, không gọi AI, ra trước sẽ tối đa hóa khung thời
+        gian để phát hiện xung đột khi 2 request tới gần nhau về thời điểm.
+    """
     attempt = get_or_create_active_attempt(session=session)
 
     if action_type == "HINT":
         attempt.hint_count += 1
         attempt.save(update_fields=["hint_count"])
+        return attempt, False
 
     if action_type == "COMPLETE":
-        attempt.completed_at = timezone.now()
-        attempt.save(update_fields=["completed_at"])
+        # JA: 「未完了の行にだけ」書き込む条件付きUPDATE。影響行数(updated)が0なら
+        #     自分より先に誰かが完了させていたということなので、この呼び出しは
+        #     「完了権」を得られなかった(won_completion=False)。
+        # VI: UPDATE có điều kiện "chỉ ghi vào dòng chưa hoàn thành". Số dòng ảnh
+        #     hưởng (updated) là 0 nghĩa là có ai đó đã hoàn thành trước, nên lần
+        #     gọi này KHÔNG giành được "quyền hoàn thành" (won_completion=False).
+        updated = Attempt.objects.filter(id=attempt.id, completed_at__isnull=True).update(
+            completed_at=timezone.now()
+        )
+        if updated == 0:
+            logger.warning(
+                "[complete] Attempt二重完了を検出、SM-2の再適用をスキップ: attempt=%s", attempt.id
+            )
+            return attempt, False
+        attempt.refresh_from_db(fields=["completed_at"])
+        return attempt, True
 
-        from apps.reviews.services import record_review_result
-
-        record_review_result(attempt, bool(understood))
-
-    return attempt
+    return attempt, False
 
 
 def get_session_graph_data(*, session: ChatSession) -> dict:
@@ -669,6 +815,17 @@ def send_message_and_get_ai_response(
     #     ghi nào khác xảy ra (nếu xét sau khi đã tạo user_msg/ai_msg thì luôn ra False).
     is_first_message = not session.messages.exists()
 
+    # JA: ★Attemptの確保と「完了権」の確定は、AI呼び出し(要約・ヒント生成)より
+    #     必ず先に行う。理由は claim_attempt_for_action のdocstring参照
+    #     (二重押下対策として、競合を検出できる時間窓を最大化するため)。
+    # VI: ★Đảm bảo có Attempt và chốt "quyền hoàn thành" LUÔN thực hiện trước khi
+    #     gọi AI (tóm tắt/sinh gợi ý). Lý do xem docstring của claim_attempt_for_action
+    #     (chống bấm 2 lần bằng cách tối đa hóa khung thời gian phát hiện xung đột).
+    attempt = None
+    won_completion = False
+    if action_type in ("HINT", "COMPLETE"):
+        attempt, won_completion = claim_attempt_for_action(session=session, action_type=action_type)
+
     # JA: ★フリーチャット(knowledge_node未設定)がCOMPLETEした瞬間に、初めて
     #     知識ノードを作成しこのセッションと1:1で紐付ける。既にノードがある
     #     セッション(復習チャット)ではここは通らない。record_review_result は
@@ -685,8 +842,12 @@ def send_message_and_get_ai_response(
             )
         create_knowledge_node_from_session(session=session, user=session.user, topic_id=topic_id)
 
-    if action_type in ("HINT", "COMPLETE"):
-        record_hint_or_completion(session=session, action_type=action_type, understood=understood)
+    # JA: ★「完了権」を得たリクエストだけがSM-2を適用する(二重押下対策)。
+    # VI: ★Chỉ request giành được "quyền hoàn thành" mới áp dụng SM-2 (chống bấm 2 lần).
+    if action_type == "COMPLETE" and won_completion:
+        from apps.reviews.services import record_review_result
+
+        record_review_result(attempt, bool(understood))
 
     # JA: ユーザーが「このノードへの返信」を明示した場合の親。未指定ならAIに推定させる。
     # VI: Node cha khi user chủ động chọn "trả lời node này". Không chỉ định thì để AI đoán.

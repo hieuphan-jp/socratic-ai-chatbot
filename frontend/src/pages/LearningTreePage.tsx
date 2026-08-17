@@ -23,48 +23,51 @@ import { Link } from 'react-router-dom'
 import { ChatTimelineView } from '@/features/learningTree/components/ChatTimelineView'
 import { LearningTreeView } from '@/features/learningTree/components/LearningTreeView'
 import { DueReviewList } from '@/features/reviews/components/DueReviewList'
+import { useI18n } from '@/shared/i18n'
+import { PageContainer, PageHeader, SegmentedControl } from '@/shared/ui'
+import type { SegmentedOption } from '@/shared/ui'
 
 type ViewMode = 'tree' | 'timeline'
 
+// JA: ヘッダーの「戻る」はボタンではなく画面遷移なので Link のまま。見た目だけ
+//     Button の ghost/sm に揃える(ヒントチャット画面のヘッダーとも共通)。
+// VI: "戻る" ở header là điều hướng, không phải hành động, nên giữ Link. Chỉ
+//     đồng bộ hình thức với ghost/sm của Button (dùng chung với header chat).
+const HEADER_LINK_CLASS =
+  'inline-flex shrink-0 items-center rounded-xl px-3 py-1.5 text-sm font-medium text-slate-500 no-underline transition-colors hover:bg-slate-100 hover:text-slate-700'
+
 export function LearningTreePage() {
   const [viewMode, setViewMode] = useState<ViewMode>('tree')
+  const { t } = useI18n()
+
+  const viewOptions: ReadonlyArray<SegmentedOption<ViewMode>> = [
+    { value: 'tree', label: t('learningTree.view.tree') },
+    { value: 'timeline', label: t('learningTree.view.timeline') },
+  ]
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between rounded-3xl border border-slate-100 bg-gradient-to-r from-teal-50/60 via-indigo-50/40 to-slate-50 p-6">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-800">学習内容ツリー</h1>
-          <p className="mt-0.5 text-xs text-slate-500">Cây nội dung đã học</p>
-        </div>
-        <Link to="/" className="text-sm text-indigo-600 hover:underline">
-          戻る / Quay lại
-        </Link>
-      </div>
+    <>
+      <PageHeader
+        title={t('learningTree.title')}
+        subtitle={t('learningTree.subtitle')}
+        actions={
+          <Link to="/" className={HEADER_LINK_CLASS}>
+            {t('common.back')}
+          </Link>
+        }
+      />
+      <PageContainer>
+        <DueReviewList />
 
-      <DueReviewList />
+        <SegmentedControl
+          options={viewOptions}
+          value={viewMode}
+          onChange={setViewMode}
+          ariaLabel={t('learningTree.title')}
+        />
 
-      <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setViewMode('tree')}
-          className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-colors ${
-            viewMode === 'tree' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          木構造 / Cây
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode('timeline')}
-          className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-colors ${
-            viewMode === 'timeline' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          タイムログ / Nhật ký thời gian
-        </button>
-      </div>
-
-      {viewMode === 'tree' ? <LearningTreeView /> : <ChatTimelineView />}
-    </main>
+        {viewMode === 'tree' ? <LearningTreeView /> : <ChatTimelineView />}
+      </PageContainer>
+    </>
   )
 }

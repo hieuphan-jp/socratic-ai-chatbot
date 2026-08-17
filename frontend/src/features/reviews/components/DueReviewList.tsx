@@ -18,11 +18,13 @@
 import { CheckCircle2, Clock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
+import { useI18n } from '@/shared/i18n'
 import { ErrorText } from '@/shared/ui'
 
 import { useDueReviews, useStartReviewSession } from '../api/hooks'
 
 export function DueReviewList() {
+  const { t } = useI18n()
   const { data, isPending, isError, error } = useDueReviews()
   const startReview = useStartReviewSession()
   const navigate = useNavigate()
@@ -33,15 +35,14 @@ export function DueReviewList() {
     })
   }
 
-  if (isPending) return <p className="text-sm text-slate-400">読み込み中… / Đang tải…</p>
+  if (isPending) return <p className="text-sm text-slate-400">{t('common.loading')}</p>
   if (isError) return <ErrorText>{(error as Error).message}</ErrorText>
 
   return (
     <div className="rounded-3xl border border-amber-100 bg-amber-50/50 p-5">
       <div className="mb-3 flex items-center gap-2">
         <Clock className="h-4 w-4 text-amber-600" />
-        <h2 className="text-sm font-semibold text-slate-800">今日の復習</h2>
-        <span className="text-xs text-slate-500">/ Ôn tập hôm nay</span>
+        <h2 className="text-sm font-semibold text-slate-800">{t('learningTree.due.title')}</h2>
         {data.length > 0 && (
           <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
             {data.length}
@@ -52,7 +53,7 @@ export function DueReviewList() {
       {data.length === 0 ? (
         <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-4 py-3 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          復習が必要なノードはありません / Không có node nào cần ôn tập
+          {t('learningTree.due.none')}
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -69,8 +70,8 @@ export function DueReviewList() {
               </span>
               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
                 {schedule.days_overdue > 0
-                  ? `${schedule.days_overdue}日超過 / quá ${schedule.days_overdue} ngày`
-                  : '本日 / hôm nay'}
+                  ? t('learningTree.due.overdue', { days: schedule.days_overdue })
+                  : t('learningTree.due.today')}
               </span>
             </button>
           ))}

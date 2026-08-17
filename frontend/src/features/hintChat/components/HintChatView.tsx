@@ -4,7 +4,7 @@
  * JA: ヒントチャットと思考ツリーのメイン表示コンポーネント。分岐推定の確認機能、ドラッグ＆ドロップ、コピー制限対応。
  * VI: Component hiển thị chính của Hint Chat và Sơ đồ tư duy. Hỗ trợ xác nhận rẽ nhánh, kéo thả Node và chặn copy tin nhắn AI.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ReactFlow,
@@ -24,6 +24,7 @@ import { TopicFolderPicker } from './TopicFolderPicker';
 import { StepLeafNode } from './StepLeafNode';
 import { layoutStepTree } from '../utils/stepTreeLayout';
 import { queryKeys } from '@/shared/api/queryKeys';
+import { useI18n } from '@/shared/i18n';
 import { Button, Notice, ErrorText } from '@/shared/ui';
 import type { ChatMessage, GraphData, SendMessagePayload } from '@/shared/types';
 
@@ -42,10 +43,25 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   activeSessionId: propSessionId,
   onSessionCreated,
 }) => {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(propSessionId);
   const [inputText, setInputText] = useState('');
   const [showTree, setShowTree] = useState(true);
+
+  // JA: ★完了ボタンの二重送信対策(実データの真の防御)。sendMessageMutation.isPending
+  //     はTanStack Query内部の非同期な状態更新を経るため、同じJS実行タイミングで
+  //     連続して(例: 高速な連打で)クリックされると、2回目の呼び出し時点でもまだ
+  //     falseのままで、disabled属性の再描画も間に合わないことを実機検証で確認した
+  //     (isPendingやdisabled属性だけを見る対策では、Attempt/知識ノードの二重作成を
+  //     防ぎきれなかった)。useRefは同期的にすぐ読み書きできるため、この隙間を作らない。
+  // VI: ★Chống gửi 2 lần cho nút hoàn thành (lớp phòng vệ thực sự). sendMessageMutation.isPending
+  //     đi qua cập nhật state bất đồng bộ nội bộ của TanStack Query, nên nếu bấm liên
+  //     tiếp trong cùng một nhịp JS (vd bấm rất nhanh), lúc gọi lần 2 giá trị vẫn là
+  //     false và thuộc tính disabled cũng chưa kịp render lại (đã xác nhận bằng kiểm
+  //     thử thực tế — chỉ dựa vào isPending/disabled không chặn được việc tạo trùng
+  //     Attempt/knowledge node). useRef đọc/ghi đồng bộ ngay lập tức nên không để lại khe hở này.
+  const isSubmittingCompleteRef = useRef(false);
 
   // React Flow States（思考ツリーのドラッグ操作用）
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -205,16 +221,21 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   // VI: Hàm xử lý nút "Hoàn thành". Session đã có node thì COMPLETE luôn,
   //     chưa có node thì mở panel chọn thư mục Topic.
   const handleCompleteClick = () => {
-    if (!currentSessionId) return;
+    // JA: ★二重押下対策(フロント側の真の防御はuseRef、isPendingは補助)。
+    if (!currentSessionId || isSubmittingCompleteRef.current) return;
     if (hasKnowledgeNode) {
       // JA: バックエンドは message_text 省略/空文字を許容する(COMPLETEは本文不要)ため、
       //     以前のようにダミー文字列を送って会話履歴を汚す必要はない。
       // VI: Backend chấp nhận message_text bỏ trống (COMPLETE không cần nội dung), nên
       //     không cần gửi chuỗi giả làm bẩn lịch sử hội thoại như trước.
-      sendMessageMutation.mutate({
-        sessionId: currentSessionId,
-        payload: { message_text: '', action_type: 'COMPLETE', understood: true },
-      });
+      isSubmittingCompleteRef.current = true;
+      sendMessageMutation.mutate(
+        {
+          sessionId: currentSessionId,
+          payload: { message_text: '', action_type: 'COMPLETE', understood: true },
+        },
+        { onSettled: () => { isSubmittingCompleteRef.current = false; } }
+      );
       return;
     }
     setSavedNodeTitle(null);
@@ -222,18 +243,40 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
   };
 
   // JA: フォルダピッカーで保存先Topicが確定した時のハンドラ。
+  //     ★isSubmittingCompleteRef.currentの同期チェック+即時setが唯一の確実な防御。
+  //     sendMessageMutation.isPendingはTanStack Query内部の非同期な状態更新を経るため、
+  //     同じJS実行タイミングで連打されると2回目の判定時点でもfalseのままになり得る
+  //     ことを実機検証(3連続クリック→2つのCOMPLETEリクエストが実際に飛び、
+  //     Attemptが2件・SM-2が2回適用される)で確認した。バックエンド側にも
+  //     知識ノードの重複を防ぐ条件付きUPDATEはあるが、Attemptは「完了すると
+  //     再び新規作成可能になる」設計(複数回の復習を許すため)のため、DB制約
+  //     だけでは二重送信そのものを完全には防げない。よって送信自体をここで
+  //     確実に1回に絞る。
   // VI: Hàm xử lý khi đã chốt Topic để lưu qua bộ chọn thư mục.
+  //     ★Kiểm tra đồng bộ + set ngay isSubmittingCompleteRef.current là lớp phòng vệ
+  //     chắc chắn duy nhất. sendMessageMutation.isPending đi qua cập nhật state bất
+  //     đồng bộ nội bộ của TanStack Query nên nếu bấm liên tiếp trong cùng nhịp JS,
+  //     lúc xét lần 2 vẫn có thể là false (đã xác nhận bằng kiểm thử thực tế: bấm 3
+  //     lần liên tiếp → thực sự gửi 2 request COMPLETE, tạo 2 Attempt và áp dụng SM-2
+  //     2 lần). Backend có UPDATE điều kiện chống trùng knowledge node, nhưng Attempt
+  //     được thiết kế "hoàn thành xong thì có thể tạo mới" (để cho phép ôn tập nhiều
+  //     lần), nên riêng ràng buộc DB không chặn được triệt để việc gửi trùng. Vì vậy
+  //     phải chặn chắc ngay tại đây, đảm bảo chỉ gửi đúng 1 lần.
   const handleSaveToTopic = (topicId: string) => {
-    if (!currentSessionId) return;
-    sendMessageMutation.mutate({
-      sessionId: currentSessionId,
-      payload: {
-        message_text: '',
-        action_type: 'COMPLETE',
-        understood: true,
-        topic_id: topicId,
+    if (!currentSessionId || isSubmittingCompleteRef.current) return;
+    isSubmittingCompleteRef.current = true;
+    sendMessageMutation.mutate(
+      {
+        sessionId: currentSessionId,
+        payload: {
+          message_text: '',
+          action_type: 'COMPLETE',
+          understood: true,
+          topic_id: topicId,
+        },
       },
-    });
+      { onSettled: () => { isSubmittingCompleteRef.current = false; } }
+    );
   };
 
   // JA: メッセージ送信ハンドラー / VI: Hàm xử lý gửi tin nhắn
@@ -273,13 +316,30 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
     handleSendMessage(inputText);
   };
 
+  // JA: ★入力欄をtextarea化したことに伴うキー操作。Enter単体で送信、Shift+Enterは
+  //     改行(textareaの既定動作に任せる=preventDefaultしない)。
+  //     e.nativeEvent.isComposing のチェックが無いと、日本語などIME変換中に
+  //     変換確定のためだけに押したEnterまで送信として拾ってしまい、変換途中の
+  //     文章が意図せず送られてしまう。
+  // VI: ★Xử lý phím sau khi đổi ô nhập thành textarea. Enter đơn gửi tin nhắn,
+  //     Shift+Enter xuống dòng (để mặc định của textarea xử lý, không preventDefault).
+  //     Nếu thiếu kiểm tra e.nativeEvent.isComposing, Enter dùng để chốt cụm từ khi
+  //     gõ IME (tiếng Nhật...) sẽ bị hiểu nhầm thành gửi, khiến câu đang gõ dở bị
+  //     gửi đi ngoài ý muốn.
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSendMessage(inputText);
+    }
+  };
+
   return (
     <div style={{ width: '100%', fontFamily: 'sans-serif', color: '#333', boxSizing: 'border-box' }}>
       
       {/* Nút Toggle Ẩn/Hiện Sơ đồ tư duy */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
-          Hint Chat Session / Phiên gợi ý
+          {t('hintChat.session.label')}
         </div>
         <button
           onClick={() => setShowTree(!showTree)}
@@ -292,7 +352,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
             cursor: 'pointer',
           }}
         >
-          🌿 思考ツリーを隠す / {showTree ? 'Ẩn cây tư duy' : 'Hiện cây tư duy'}
+          🌿 {showTree ? t('hintChat.tree.hide') : t('hintChat.tree.show')}
         </button>
       </div>
 
@@ -306,8 +366,8 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
               disabled={sendMessageMutation.isPending}
             >
               {hasKnowledgeNode
-                ? '復習を完了する / Hoàn thành ôn tập'
-                : '学習を完了して知識ノードとして保存 / Hoàn thành và lưu thành knowledge node'}
+                ? t('hintChat.complete.review')
+                : t('hintChat.complete.saveAsNode')}
             </Button>
           )}
 
@@ -320,14 +380,12 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                 borderRadius: '8px',
               }}
             >
-              <Notice>
-                学習木のどのフォルダに保存するか選んでください（フォルダを開いて絞り込めます）/
-                Chọn lưu vào thư mục nào trong cây học tập (có thể mở thư mục để đi sâu hơn)
-              </Notice>
+              <Notice>{t('hintChat.complete.folderPrompt')}</Notice>
               <div style={{ marginTop: '8px' }}>
                 <TopicFolderPicker
                   onSelect={handleSaveToTopic}
                   onCancel={() => setShowSaveAsNode(false)}
+                  disabled={sendMessageMutation.isPending}
                 />
               </div>
               {sendMessageMutation.isError && (
@@ -337,10 +395,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           )}
 
           {savedNodeTitle && (
-            <Notice>
-              知識ノード「{savedNodeTitle}」として保存しました / Đã lưu thành knowledge node "
-              {savedNodeTitle}"
-            </Notice>
+            <Notice>{t('hintChat.complete.saved', { title: savedNodeTitle })}</Notice>
           )}
         </div>
       )}
@@ -363,12 +418,11 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
             boxSizing: 'border-box',
           }}
         >
-          {isLoadingMessages && <p style={{ fontSize: '12px', color: '#9ca3af' }}>Đang tải...</p>}
+          {isLoadingMessages && <p style={{ fontSize: '12px', color: '#9ca3af' }}>{t('common.loading')}</p>}
 
           {!isLoadingMessages && messages.length === 0 && (
             <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>
-              質問を送るとヒントが返ってきます /<br />
-              Gửi câu hỏi để nhận gợi ý
+              {t('hintChat.emptyHint')}
             </div>
           )}
 
@@ -426,7 +480,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                       onCopy={(e) => {
                         if (!isUser) {
                           e.preventDefault();
-                          alert('JA: AIのヒントメッセージはコピーできません。 / VI: Không thể copy tin nhắn gợi ý từ AI.');
+                          alert(t('hintChat.copyBlocked'));
                         }
                       }}
                     >
@@ -449,9 +503,12 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                       }}
                     >
                       <div style={{ marginBottom: '6px', fontWeight: '500' }}>
-                        💡 AI Gợi ý: Câu hỏi này có vẻ liên quan đến câu hỏi trước đó:{' '}
-                        <i>"{suggestedParentMsg ? suggestedParentMsg.message_text.substring(0, 30) + '...' : 'Câu thoại cũ'}"</i>.
-                        Bạn có muốn rẽ nhánh cây tư duy từ câu đó không?
+                        💡{' '}
+                        {t('hintChat.branch.suggestion', {
+                          quote: suggestedParentMsg
+                            ? suggestedParentMsg.message_text.substring(0, 30) + '...'
+                            : t('hintChat.branch.oldMessageFallback'),
+                        })}
                       </div>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                         <button
@@ -475,7 +532,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                             fontWeight: '500',
                           }}
                         >
-                          🌿 Đồng ý rẽ nhánh
+                          🌿 {t('hintChat.branch.confirm')}
                         </button>
                         <button
                           type="button"
@@ -501,7 +558,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                             cursor: 'pointer',
                           }}
                         >
-                          Giữ nguyên
+                          {t('hintChat.branch.keep')}
                         </button>
                       </div>
                     </div>
@@ -522,7 +579,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
                     fontStyle: 'italic',
                   }}
                 >
-                  Thinking...
+                  {t('hintChat.thinking')}
                 </div>
               </div>
             )}
@@ -546,9 +603,9 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <h3 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0, color: '#111827' }}>
-                🌿 思考プロセス / Tiến trình tư duy
+                🌿 {t('hintChat.tree.title')}
               </h3>
-              <span style={{ fontSize: '11px', color: '#6b7280' }}>✋ Có thể kéo/thả node</span>
+              <span style={{ fontSize: '11px', color: '#6b7280' }}>✋ {t('hintChat.tree.dragHint')}</span>
             </div>
 
             <div
@@ -582,18 +639,21 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
 
       {/* Form nhập liệu tin nhắn */}
       <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
-        <input
-          type="text"
+        <textarea
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="質問を入力 / Nhập câu hỏi"
+          onKeyDown={handleInputKeyDown}
+          placeholder={t('hintChat.input.placeholder')}
+          rows={2}
           style={{
             flex: 1,
             padding: '10px 14px',
             fontSize: '13px',
+            fontFamily: 'inherit',
             border: '1px solid #d1d5db',
             borderRadius: '6px',
             outline: 'none',
+            resize: 'none',
           }}
           disabled={sendMessageMutation.isPending || createSessionMutation.isPending}
         />
@@ -615,7 +675,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
             fontWeight: '500',
           }}
         >
-          {sendMessageMutation.isPending ? '送信中...' : '送信 / Gửi'}
+          {sendMessageMutation.isPending ? t('hintChat.sending') : t('hintChat.send')}
         </button>
       </form>
 

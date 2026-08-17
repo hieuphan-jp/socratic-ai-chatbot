@@ -50,8 +50,10 @@ export function SegmentedControl<T extends string>({
             className={cn(
               'inline-flex items-center gap-1.5 rounded-xl border-0 px-4 py-1.5 text-sm font-medium transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500',
+              // ★teal-700。白文字コントラストがWCAG AA未達(3.66:1)だったteal-600から変更(Button.tsx参照)。
+              // ★teal-700. Đổi từ teal-600 vì tương phản chữ trắng không đạt WCAG AA (3.66:1) (xem Button.tsx).
               selected
-                ? 'bg-teal-600 text-white'
+                ? 'bg-teal-700 text-white'
                 : 'bg-transparent text-slate-500 hover:text-slate-700'
             )}
           >

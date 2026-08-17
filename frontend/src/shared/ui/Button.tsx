@@ -21,8 +21,12 @@ export type ButtonSize = 'sm' | 'md'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   // JA: 画面で一番やってほしい操作。1画面に1つが目安。
+  //     ★teal-600ではなくteal-700。白文字とのコントラストがWCAG AA(4.5:1)未達(3.66:1)だったため、
+  //     Figmaデザインシステム側のQAで検出し teal-700(5.39:1)に統一した。
   // VI: Hành động muốn user làm nhất trên màn hình. Mỗi màn hình nên chỉ 1 cái.
-  primary: 'border-0 bg-teal-600 text-white hover:bg-teal-700 disabled:bg-slate-300',
+  //     ★Dùng teal-700 thay vì teal-600. Độ tương phản với chữ trắng không đạt WCAG AA
+  //     (3.66:1 < 4.5:1), phát hiện khi QA design system trên Figma nên đã đổi sang teal-700 (5.39:1).
+  primary: 'border-0 bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-300',
   // JA: 並列の選択肢・補助操作。
   // VI: Lựa chọn ngang hàng, thao tác phụ.
   secondary:
