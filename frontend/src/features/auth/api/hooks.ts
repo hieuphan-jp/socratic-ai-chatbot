@@ -14,11 +14,19 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api } from '@/shared/api/client'
+import { api, setCsrfToken } from '@/shared/api/client'
 import { queryKeys } from '@/shared/api/queryKeys'
 import type { User } from '@/shared/types'
 
 type Credentials = { username: string; password: string }
+
+// JA: ★ログイン/新規登録のレスポンス本文には、ユーザー情報に加えて最新のcsrfToken
+//     も乗っている(apps/accounts/views.py参照)。login()はサーバー側でCSRFトークンを
+//     ローテーションするため、以前(/auth/csrf/取得時)のトークンはここで失効している。
+// VI: ★Body response của đăng nhập/đăng ký, ngoài thông tin user còn kèm csrfToken
+//     mới nhất (xem apps/accounts/views.py). Vì login() ở server rotate CSRF token,
+//     token lấy từ trước (/auth/csrf/) đã hết hiệu lực tại đây.
+type AuthResponse = User & { csrfToken: string }
 
 export function useMe() {
   return useQuery({
@@ -34,10 +42,13 @@ export function useMe() {
 export function useLogin() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (creds: Credentials) => api.post<User>('/auth/login/', creds),
-    onSuccess: (user) => {
-      // JA: 取得済みの me を即差し替え、関連クエリを無効化する。
-      // VI: Thay ngay me đã có và invalidate các query liên quan.
+    mutationFn: (creds: Credentials) => api.post<AuthResponse>('/auth/login/', creds),
+    onSuccess: ({ csrfToken, ...user }) => {
+      // JA: ローテーションされた最新のCSRFトークンを反映してから、
+      //     取得済みの me を即差し替え、関連クエリを無効化する。
+      // VI: Cập nhật CSRF token mới nhất (đã rotate) trước, rồi thay ngay
+      //     me đã có và invalidate các query liên quan.
+      setCsrfToken(csrfToken)
       qc.setQueryData(queryKeys.me, user)
       qc.invalidateQueries({ queryKey: queryKeys.me })
     },
@@ -54,8 +65,11 @@ export function useLogin() {
 export function useSignup() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (creds: Credentials) => api.post<User>('/auth/signup/', creds),
-    onSuccess: (user) => {
+    mutationFn: (creds: Credentials) => api.post<AuthResponse>('/auth/signup/', creds),
+    onSuccess: ({ csrfToken, ...user }) => {
+      // JA: useLoginと同じ理由でCSRFトークンを先に反映する。
+      // VI: Cập nhật CSRF token trước, cùng lý do với useLogin.
+      setCsrfToken(csrfToken)
       qc.setQueryData(queryKeys.me, user)
       qc.invalidateQueries({ queryKey: queryKeys.me })
     },
@@ -74,8 +88,15 @@ export function useLogout() {
   })
 }
 
-// JA: CSRF Cookie を事前取得するための一回きりの呼び出し（アプリ起動時に使う）。
-// VI: Gọi một lần để lấy trước CSRF Cookie (dùng khi khởi động app).
-export function fetchCsrf() {
-  return api.get<{ csrfToken: string }>('/auth/csrf/')
+// JA: CSRFトークンを事前取得するための一回きりの呼び出し（アプリ起動時に使う）。
+//     ★取得したトークンを必ずclient.tsのメモリに反映する。以前はここで
+//     レスポンスを受け取るだけで値を使っていなかったため、実質何もしていない
+//     呼び出しになっていた(readCsrfTokenがdocument.cookieを直接読んでいたため)。
+// VI: Gọi một lần để lấy trước CSRF token (dùng khi khởi động app).
+//     ★Bắt buộc phản ánh token lấy được vào bộ nhớ ở client.ts. Trước đây chỉ
+//     nhận response mà không dùng giá trị (vì readCsrfToken đọc thẳng
+//     document.cookie), nên lệnh gọi này thực chất không có tác dụng gì.
+export async function fetchCsrf() {
+  const { csrfToken } = await api.get<{ csrfToken: string }>('/auth/csrf/')
+  setCsrfToken(csrfToken)
 }

@@ -59,11 +59,26 @@ export class ApiError extends Error {
   }
 }
 
-// JA: Django が発行する csrftoken Cookie を読む。
-// VI: Đọc Cookie csrftoken do Django phát hành.
-function readCsrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
-  return match ? decodeURIComponent(match[1]) : ''
+// JA: ★CSRFトークンをメモリに保持する。以前はdocument.cookieからcsrftoken Cookie
+//     を直接読んでいたが、フロント(vercel.app等)とバックエンド(onrender.com等)が
+//     別ドメインだと、そのCookieはブラウザが自動送信こそすれ、JS(document.cookie)
+//     からは同一オリジン制限で一切読めない(実際に本番で「X-Csrftoken header has
+//     incorrect length」= 常に空文字を送っていたことが原因のCSRF 403で発覚した)。
+//     そこでCookieを読む代わりに、バックエンドがレスポンス本文でも配布している
+//     csrfToken(CsrfView/LoginView/SignupView参照)をここに保持し、それを使う。
+//     ローカル開発(同一オリジン)でもこの経路で問題なく動く。
+// VI: ★Giữ CSRF token trong bộ nhớ. Trước đây đọc trực tiếp Cookie csrftoken qua
+//     document.cookie, nhưng khi frontend (vercel.app...) và backend (onrender.com...)
+//     khác domain, Cookie đó trình duyệt vẫn tự gửi kèm request, nhưng JS
+//     (document.cookie) KHÔNG đọc được do giới hạn same-origin (thực tế phát hiện ở
+//     production qua lỗi CSRF 403 "X-Csrftoken header has incorrect length" = luôn
+//     gửi chuỗi rỗng). Nên thay vì đọc Cookie, giữ lại csrfToken mà backend cũng phát
+//     qua body response (xem CsrfView/LoginView/SignupView) rồi dùng giá trị đó.
+//     Cách này vẫn chạy tốt ở local dev (cùng origin).
+let csrfToken = ''
+
+export function setCsrfToken(token: string): void {
+  csrfToken = token
 }
 
 // JA: 変更系メソッドは CSRF トークンが必要。
@@ -82,7 +97,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const headers: Record<string, string> = {}
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
-  if (CSRF_METHODS.has(method)) headers['X-CSRFToken'] = readCsrfToken()
+  if (CSRF_METHODS.has(method)) headers['X-CSRFToken'] = csrfToken
 
   const res = await fetch(`${API_BASE}${path}`, {
     method,
