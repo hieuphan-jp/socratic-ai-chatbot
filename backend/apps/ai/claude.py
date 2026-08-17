@@ -96,12 +96,25 @@ class ClaudeProvider(LLMProvider):
             claude_role = "assistant" if role == "assistant" else "user"
             contents.append({"role": claude_role, "content": content or ""})
 
+        # JA: ★Claude APIは(1)最初のメッセージがuserロールであること、(2)user
+        #     メッセージのcontentが非空であることの両方を要求する。以前はここで
+        #     content=""の空文字を挿入しており、(1)は満たしても(2)に違反して
+        #     400 "user messages must have non-empty content"になっていた
+        #     (履歴がAIメッセージ単独で始まるセッション—例: 実際の対話なしに
+        #     知識ノードを作った直後の会話—で発生を確認)。空文字ではなく
+        #     最小限の非空プレースホルダーを使う。
+        # VI: ★Claude API yêu cầu cả (1) tin nhắn đầu tiên phải có role "user"
+        #     lẫn (2) content của tin nhắn user không được rỗng. Trước đây chèn
+        #     content="" ở đây, thỏa (1) nhưng vi phạm (2), gây lỗi 400
+        #     "user messages must have non-empty content" (đã xác nhận xảy ra
+        #     với session mà lịch sử chỉ có 1 tin AI đơn lẻ — vd: vừa tạo
+        #     knowledge node mà chưa từng có hội thoại thật). Dùng placeholder
+        #     tối thiểu không rỗng thay vì chuỗi rỗng.
+        placeholder = "..."
         if not contents:
-            contents = [{"role": "user", "content": ""}]
-        # JA: Claude APIは最初のメッセージがuserである必要がある。
-        # VI: Claude API yêu cầu tin nhắn đầu tiên phải là role "user".
+            contents = [{"role": "user", "content": placeholder}]
         if contents[0]["role"] != "user":
-            contents.insert(0, {"role": "user", "content": ""})
+            contents.insert(0, {"role": "user", "content": placeholder})
 
         last_error: Exception | None = None
 

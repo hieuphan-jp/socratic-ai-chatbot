@@ -91,3 +91,24 @@ export function useStartReviewSession() {
     },
   })
 }
+
+// JA: ★葉(知識ノード)の削除。バックエンド側のon_deleteで関連レコードの扱いが
+//     決まっている(ReviewSchedule=CASCADEで一緒に消える、ChatSession=SET_NULLで
+//     会話自体は残る)ため、フロントは特別な後始末をせず、木構造と復習スケジュール
+//     (どちらも定着率%や葉一覧に使う)を無効化して取り直すだけでよい。
+//     所有権チェックはバックエンドのget_queryset(topic__user)が行う。
+// VI: ★Xóa lá (knowledge node). Cách xử lý bản ghi liên quan do on_delete ở backend
+//     quyết định (ReviewSchedule=CASCADE nên mất theo, ChatSession=SET_NULL nên hội
+//     thoại vẫn còn), nên frontend không cần dọn gì thêm, chỉ cần invalidate cây nội
+//     dung đã học và lịch ôn tập (cả 2 đều dùng cho % ghi nhớ và danh sách lá) rồi lấy
+//     lại. Kiểm tra quyền sở hữu do get_queryset (topic__user) ở backend đảm nhiệm.
+export function useDeleteKnowledgeNode() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (nodeId: string) => api.delete<void>(`/knowledge-nodes/${nodeId}/`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.learningTree.all })
+      queryClient.invalidateQueries({ queryKey: queryKeys.reviews.all })
+    },
+  })
+}

@@ -16,10 +16,29 @@
  *       - Chuẩn hóa lỗi thành ApiError (màn hình xử lý nhất quán)
  *     Nhờ vậy chính sách auth/CSRF/xử lý lỗi gom trong 1 file, 5 người không lệch nhau.
  */
+import { DEFAULT_LOCALE, loadLocale } from '@/shared/i18n/locale'
+import { messages } from '@/shared/i18n/messages'
 
-// JA: API の基点。Vite プロキシ経由なので相対パスでよい。
-// VI: Gốc API. Đi qua proxy Vite nên dùng đường dẫn tương đối là đủ.
-const API_BASE = '/api'
+// JA: API の基点。ローカル開発は Vite プロキシ経由なので相対パス '/api' のままでよいが、
+//     本番はフロントとバックエンドが別ドメインなので相対パスだとフロント自身のドメインを
+//     叩いてしまう。VITE_API_BASE_URL(例: https://xxx.onrender.com/api)があればそちらを使う。
+// VI: Gốc API. Local dev đi qua proxy Vite nên đường dẫn tương đối '/api' vẫn ổn, nhưng ở
+//     production frontend/backend khác domain nên đường dẫn tương đối sẽ gọi nhầm vào chính
+//     domain của frontend. Nếu có VITE_API_BASE_URL (vd: https://xxx.onrender.com/api) thì dùng nó.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+
+// JA: ★このファイルはReactの外(コンポーネント無し)で動くため useI18n() は使えない。
+//     messages 辞書と loadLocale を直接読む純粋関数呼び出しで多言語化する
+//     (サーバが detail を返さなかった時の通信エラーの既定文言のみが対象)。
+// VI: ★File này chạy ngoài React (không có component) nên không dùng được useI18n().
+//     Đa ngôn ngữ hóa bằng cách gọi trực tiếp hàm thuần đọc từ điển messages và
+//     loadLocale (chỉ áp dụng cho câu chữ lỗi mặc định khi server không trả detail).
+function requestFailedMessage(status: number): string {
+  const locale = loadLocale()
+  const table = messages[locale] ?? messages[DEFAULT_LOCALE]
+  const template = table['common.requestFailed'] ?? messages[DEFAULT_LOCALE]['common.requestFailed']
+  return template.replace('{status}', String(status))
+}
 
 // JA: ログイン画面のパス。401 時のリダイレクト先。router と一致させること。
 // VI: Đường dẫn trang đăng nhập, đích chuyển hướng khi 401. Phải khớp với router.
@@ -95,7 +114,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     // VI: Lấy message từ {detail: ...} của server hoặc từ lỗi theo trường.
     const message =
       (data && typeof data === 'object' && 'detail' in data && String((data as { detail: unknown }).detail)) ||
-      `リクエストに失敗しました (${res.status}) / Yêu cầu thất bại (${res.status})`
+      requestFailedMessage(res.status)
     throw new ApiError(res.status, message, data)
   }
 

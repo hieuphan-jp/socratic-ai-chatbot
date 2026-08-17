@@ -125,9 +125,16 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       parentMessageId: string | null;
     }) => chatApi.confirmParent(sessionId, { message_id: messageId, parent_message_id: parentMessageId }),
     onSuccess: (_updatedMsg: any, variables) => {
-      // JA: キャッシュの親と確認フラグを直接更新し、確認バナーを即座に消す。
-      // VI: Cập nhật trực tiếp node cha và cờ xác nhận trong cache để banner biến mất ngay.
-      queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
+      // JA: ★キャッシュキーは必ずvariables.sessionId(この呼び出しに実際に使われたID)を
+      //     使う。currentSessionIdはstateのクロージャで、setStateの非同期性により
+      //     「セッション新規作成直後の初回送信」では古い値(undefined)を指したままに
+      //     なり得る(sendMessageMutationのonSuccessで実際に起きていた不具合と同種の
+      //     ため、同じ直し方で揃える)。
+      // VI: ★Khóa cache luôn dùng variables.sessionId (ID thực sự dùng cho lần gọi này).
+      //     currentSessionId là closure của state, do setState bất đồng bộ nên ở lần gửi
+      //     đầu tiên ngay sau khi tạo session mới có thể vẫn trỏ về giá trị cũ (undefined)
+      //     (cùng loại lỗi đã xảy ra ở onSuccess của sendMessageMutation, sửa đồng bộ theo).
+      queryClient.setQueryData(['chatMessages', variables.sessionId], (oldData: ChatMessage[] | undefined) => {
         if (!oldData) return [];
         return oldData.map((m) => {
           if (String(m.id).toLowerCase() === String(variables.messageId).toLowerCase()) {
@@ -143,7 +150,7 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       // JA: 親が変わると木の形と採番も変わるので、サーバーから取り直す。
       // VI: Đổi node cha thì hình dạng cây và cách đánh số cũng đổi, nên lấy lại từ server.
       queryClient.invalidateQueries({
-        queryKey: queryKeys.chat.tree(currentSessionId ?? ''),
+        queryKey: queryKeys.chat.tree(variables.sessionId),
       });
     },
   });
@@ -189,20 +196,38 @@ export const HintChatView: React.FC<HintChatViewProps> = ({
       sessionId: string;
       payload: SendMessagePayload;
     }) => chatApi.sendMessage(sessionId, payload),
-    onSuccess: (data: any) => {
-      queryClient.setQueryData(['chatMessages', currentSessionId], (oldData: ChatMessage[] | undefined) => {
+    onSuccess: (data: any, variables) => {
+      // JA: ★キャッシュキーはcurrentSessionId(stateのクロージャ)ではなく、必ず
+      //     variables.sessionId(このmutate呼び出しに実際に渡されたID)を使う。
+      //     新規セッションの1通目送信では、handleSendMessageがsetCurrentSessionId()
+      //     の直後に同期的にmutate()を呼ぶため、この時点のsendMessageMutationは
+      //     まだ古いレンダー(currentSessionId=undefined)のクロージャを持っている。
+      //     以前はここでcurrentSessionIdを直接参照していたため、1通目の返信が
+      //     ['chatMessages', undefined]という誰も読まないキーに書き込まれて画面に
+      //     反映されず、2通目を送った時のinvalidateQueriesによる再取得で初めて
+      //     1通目・2通目がまとめて表示される不具合になっていた。
+      // VI: ★Khóa cache luôn dùng variables.sessionId (ID thực sự truyền vào lần gọi
+      //     mutate này), không dùng currentSessionId (closure của state). Ở lần gửi
+      //     đầu tiên của session mới, handleSendMessage gọi mutate() ngay sau
+      //     setCurrentSessionId() một cách đồng bộ, nên sendMessageMutation lúc đó vẫn
+      //     giữ closure của lần render cũ (currentSessionId=undefined). Trước đây dùng
+      //     trực tiếp currentSessionId ở đây khiến phản hồi của tin đầu tiên bị ghi vào
+      //     khóa ['chatMessages', undefined] mà không ai đọc, không hiện lên màn hình;
+      //     mãi tới khi gửi tin thứ 2, invalidateQueries mới lấy lại và hiện cả 2 tin cùng lúc.
+      const sessionId = variables.sessionId;
+      queryClient.setQueryData(['chatMessages', sessionId], (oldData: ChatMessage[] | undefined) => {
         const newData = oldData ? [...oldData] : [];
         if (data.user_message) newData.push(data.user_message);
         if (data.ai_message) newData.push(data.ai_message);
         return newData;
       });
-      queryClient.invalidateQueries({ queryKey: ['chatMessages', currentSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['chatMessages', sessionId] });
       // JA: 新しいステップが増えた可能性があるので思考ツリーを取り直す。
       //     幹/枝の判定と採番はサーバー側で行われるため、ここで再取得しないと反映されない。
       // VI: Có thể vừa thêm bước mới nên lấy lại cây tư duy.
       //     Việc phán đoán thân/nhánh và đánh số nằm ở server nên không lấy lại thì không cập nhật.
       queryClient.invalidateQueries({
-        queryKey: queryKeys.chat.tree(currentSessionId ?? ''),
+        queryKey: queryKeys.chat.tree(sessionId),
       });
       // JA: ★COMPLETEで新しい知識ノードが作られた場合、セッション一覧を
       //     再取得してhasKnowledgeNodeを更新し、完了メッセージを表示する。

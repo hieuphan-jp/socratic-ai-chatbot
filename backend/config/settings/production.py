@@ -37,6 +37,36 @@ DATABASES = {
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
+# JA: フロントとバックエンドが別ドメイン(別サーバー)構成のため、Cookieをクロスオリジンで
+#     やり取りできるようにする。SameSite=None は Secure(HTTPS)とセットでのみブラウザに
+#     受理されるため、上の SESSION_COOKIE_SECURE / CSRF_COOKIE_SECURE = True と対になる。
+# VI: Frontend và backend nằm ở domain (server) khác nhau, nên cần cho phép Cookie đi
+#     kèm request cross-origin. SameSite=None chỉ được trình duyệt chấp nhận khi đi kèm
+#     Secure (HTTPS), nên luôn đi cùng SESSION_COOKIE_SECURE / CSRF_COOKIE_SECURE = True ở trên.
+SESSION_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SAMESITE = "None"
+
+# JA: Render 等のPaaSはTLSをリバースプロキシ側で終端し、Djangoにはhttpで転送してくる。
+#     この指定が無いと Django は自分がHTTP応答中だと誤認し、Secure Cookieやリダイレクトの
+#     判定を誤る。
+# VI: Các PaaS như Render kết thúc TLS ở reverse proxy rồi chuyển tiếp bằng http tới Django.
+#     Thiếu dòng này thì Django hiểu nhầm đang phản hồi qua HTTP, làm sai phán đoán về
+#     Secure Cookie/redirect.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# JA: フロントのオリジンを環境変数で指定する(カンマ区切りで複数可)。例:
+#     CORS_ALLOWED_ORIGINS=https://chill-education.vercel.app
+#     CSRF_TRUSTED_ORIGINS=https://chill-education.vercel.app
+#     local.py にはあるがここには無く、別ドメイン構成でクロスオリジンのCookie付き
+#     リクエストが全てブロックされていた(このコメントを書いている時点で発見・修正)。
+# VI: Chỉ định origin của frontend qua biến môi trường (phân tách bằng dấu phẩy nếu
+#     nhiều origin). local.py có nhưng ở đây trước đó không có, khiến mọi request kèm
+#     Cookie cross-origin bị chặn hết khi frontend/backend khác domain (phát hiện và
+#     sửa ngay lúc viết comment này).
+CORS_ALLOWED_ORIGINS = [o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o]
+
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "gemini")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -44,3 +74,17 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # JA: 分岐推定の方式(ai / bigram / off)。詳細は local.py のコメントを参照。
 # VI: Phương thức đoán nhánh (ai / bigram / off). Xem chú thích ở local.py.
 CHAT_BRANCHING_STRATEGY = os.environ.get("CHAT_BRANCHING_STRATEGY", "ai")
+
+# JA: gunicorn は静的ファイルを自分で配信しないため、WhiteNoiseに任せる。
+#     collectstatic の出力先が STATIC_ROOT。manifest化+圧縮で配信する。
+# VI: gunicorn không tự phục vụ static file, nên giao cho WhiteNoise.
+#     STATIC_ROOT là nơi collectstatic xuất ra. Phục vụ dạng manifest + nén.
+MIDDLEWARE = MIDDLEWARE.copy()
+MIDDLEWARE.insert(2, "whitenoise.middleware.WhiteNoiseMiddleware")
+
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}

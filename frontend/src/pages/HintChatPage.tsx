@@ -6,12 +6,22 @@
  *     「復習を始める」で入ってくる経路)。無ければ従来通り新規チャットとして始まる。
  *     セッションが変わったらkeyで再マウントし、前のセッションの入力欄や思考ツリーの
  *     状態が残らないようにする。
+ *     ★2026-08 修正: 新規チャットでセッションが作られた直後、URLを /hint-chat/:sessionId
+ *     に置き換える(onSessionCreated)。これが無いと、セッションIDはReactのstateにしか
+ *     残らないため、ページ再読み込みやHMR等での再マウントが起きた瞬間に「どのセッションを
+ *     表示すべきか」が分からなくなり、会話がまるごと消えたように見えるバグがあった
+ *     (データ自体はサーバーに残っているが、フロントエンドが参照を失うだけ)。
  * VI: Trang chat hint. Chỉ lắp ghép, nội dung nằm ở features/hintChat.
  *     ★Nếu URL có :sessionId thì mở sẵn phiên đó (đường vào từ nút "Bắt đầu ôn tập"
  *     ở lá cây học tập). Không có thì bắt đầu như một phiên chat mới như trước.
  *     Khi đổi phiên thì remount qua key để state ô nhập/cây tư duy của phiên cũ không sót lại.
+ *     ★Sửa 08/2026: Ngay sau khi session mới được tạo ở chat tự do, thay URL thành
+ *     /hint-chat/:sessionId (onSessionCreated). Thiếu bước này thì sessionId chỉ nằm
+ *     trong state của React, nên chỉ cần tải lại trang hoặc bị remount do HMR... là
+ *     mất dấu "đang xem session nào", trông như cả cuộc hội thoại biến mất (dữ liệu
+ *     vẫn còn trên server, chỉ là frontend mất tham chiếu).
  */
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { HintChatView } from '@/features/hintChat/components/HintChatView'
 import { useI18n } from '@/shared/i18n'
@@ -27,6 +37,7 @@ const HEADER_LINK_CLASS =
 export function HintChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const { t } = useI18n()
+  const navigate = useNavigate()
 
   return (
     <>
@@ -46,7 +57,11 @@ export function HintChatPage() {
         }
       />
       <PageContainer width="wide">
-        <HintChatView key={sessionId ?? 'new'} activeSessionId={sessionId} />
+        <HintChatView
+          key={sessionId ?? 'new'}
+          activeSessionId={sessionId}
+          onSessionCreated={(newSessionId) => navigate(`/hint-chat/${newSessionId}`, { replace: true })}
+        />
       </PageContainer>
     </>
   )

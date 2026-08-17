@@ -11,6 +11,10 @@
  *     ★さらに「復習を始める」で、その葉のチャットセッションに実際に入り直せる
  *     (会話ログタブは読むだけなので、続きを対話するにはチャット画面へ移る必要がある)。
  *     これが要件のパターン2「対応する過去のチャットセッションに再度入る」に当たる。
+ *     ★ノードの削除もここから行える(詳細タブのみ、破壊的操作なので「削除する」を
+ *     押しても即削除せず、一段インラインの確認を挟んでから実行する)。削除後の
+ *     関連レコードの扱い(ReviewSchedule=CASCADE / ChatSession=SET_NULL)は
+ *     バックエンドのモデル定義側で担保しているため、ここでは特別な後始末をしない。
  * VI: Hiển thị chi tiết (nội dung, độ ghi nhớ, ngày ôn kế tiếp) của lá đang chọn.
  *     ★Chuyển tab "Chi tiết" / "Lịch sử hội thoại" để xem cả hội thoại theo thứ
  *     tự thời gian (đúng thứ tự phát ngôn, không phải dạng rẽ nhánh của cây tư
@@ -21,18 +25,22 @@
  *     ★Ngoài ra nút "Bắt đầu ôn tập" cho phép vào lại đúng phiên chat của lá đó
  *     (tab lịch sử chỉ để đọc, muốn nói tiếp thì phải sang màn hình chat).
  *     Đây chính là bước "vào lại phiên chat cũ tương ứng" ở pattern 2 của yêu cầu.
+ *     ★Cũng có thể xóa node ngay từ đây (chỉ ở tab chi tiết). Đây là thao tác phá
+ *     hủy nên bấm "Xóa" không xóa ngay, mà hiện xác nhận inline 1 bước trước khi
+ *     thực thi. Cách xử lý bản ghi liên quan sau khi xóa (ReviewSchedule=CASCADE /
+ *     ChatSession=SET_NULL) do model ở backend đảm nhiệm, nên ở đây không cần dọn thêm.
  */
 import { useState } from 'react'
 
 import { useNavigate } from 'react-router-dom'
 
-import { BookOpen, Calendar, Clock, MessageSquare, Play, X } from 'lucide-react'
+import { BookOpen, Calendar, Clock, MessageSquare, Play, Trash2, X } from 'lucide-react'
 
 import { LOCALE_TO_INTL, useI18n } from '@/shared/i18n'
 import { ErrorText } from '@/shared/ui'
 import type { ReviewSchedule } from '@/shared/types'
 
-import { useKnowledgeNodeDetail, useStartReviewSession } from '../api/hooks'
+import { useDeleteKnowledgeNode, useKnowledgeNodeDetail, useStartReviewSession } from '../api/hooks'
 import { ChatHistoryPanel } from './ChatHistoryPanel'
 
 interface NodeDetailPanelProps {
@@ -47,9 +55,11 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
   const { t, locale } = useI18n()
   const { data, isPending, isError, error } = useKnowledgeNodeDetail(nodeId)
   const [tab, setTab] = useState<Tab>('detail')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const chatSessionId = schedule?.chat_session_id ?? null
   const navigate = useNavigate()
   const startReview = useStartReviewSession()
+  const deleteNode = useDeleteKnowledgeNode()
 
   // JA: 葉に対応するチャットセッションを get-or-create してから、その画面へ移る。
   //     セッションIDが既知でも同じ経路を通す(理由は useStartReviewSession のコメント)。
@@ -61,8 +71,16 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
     })
   }
 
+  // JA: 確認済みの削除実行。成功したらパネルを閉じる(=選択解除。木からも消えている)。
+  // VI: Thực thi xóa sau khi đã xác nhận. Thành công thì đóng panel (=bỏ chọn, đã mất khỏi cây).
+  const handleConfirmDelete = () => {
+    deleteNode.mutate(nodeId, {
+      onSuccess: () => onClose(),
+    })
+  }
+
   return (
-    <div className="flex h-full flex-col rounded-3xl border border-slate-100 bg-white shadow-sm">
+    <div className="flex max-h-[calc(100vh-160px)] flex-col rounded-3xl border border-slate-100 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <div className="flex items-center gap-2 text-slate-700">
           <BookOpen className="h-4 w-4 text-teal-600" />
@@ -106,7 +124,15 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
         </div>
       )}
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      {/* JA: ★min-h-0が無いとflex-1がoverflow-y-autoを無視して自然な高さまで伸び、
+              フッターの「復習を始める」ボタンがパネルの見た目の外(画面下)へ押し出されて
+              事実上押せなくなる不具合があった(木構造で葉の数が少なくグリッドの兄弟列
+              が低いと、パネルがh-fullでその低い高さに引き伸ばされて発生)。
+              VI: ★Thiếu min-h-0 thì flex-1 phớt lờ overflow-y-auto và cao theo nội dung,
+              đẩy nút "Bắt đầu ôn tập" ở footer ra khỏi khung nhìn của panel (xuống dưới
+              màn hình) khiến bấm không được (xảy ra khi cột cây có ít lá nên thấp, còn
+              panel dùng h-full bị kéo giãn theo chiều cao thấp đó). */}
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
         {tab === 'chatHistory' && chatSessionId ? (
           <ChatHistoryPanel sessionId={chatSessionId} />
         ) : (
@@ -151,6 +177,48 @@ export function NodeDetailPanel({ nodeId, schedule, onClose }: NodeDetailPanelPr
                     </>
                   ) : (
                     <p>{t('learningTree.node.unlearned')}</p>
+                  )}
+                </div>
+
+                {/* JA: ★破壊的操作なので、他の情報から少し離し、控えめな色で置く。
+                        VI: ★Thao tác phá hủy nên đặt tách khỏi thông tin khác, dùng màu kín đáo. */}
+                <div className="border-t border-slate-100 pt-3">
+                  {confirmingDelete ? (
+                    <div className="space-y-2 rounded-2xl bg-red-50 p-3">
+                      <p className="text-xs text-red-700">{t('learningTree.node.deleteConfirm')}</p>
+                      {deleteNode.isError && (
+                        <ErrorText>{(deleteNode.error as Error).message}</ErrorText>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleConfirmDelete}
+                          disabled={deleteNode.isPending}
+                          className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          {deleteNode.isPending
+                            ? t('learningTree.node.deleting')
+                            : t('learningTree.node.deleteConfirmButton')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDelete(false)}
+                          disabled={deleteNode.isPending}
+                          className="rounded-xl border-0 bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-200"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(true)}
+                      className="flex items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 text-xs font-medium text-red-500 transition-colors hover:text-red-700"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t('learningTree.node.delete')}
+                    </button>
                   )}
                 </div>
               </>

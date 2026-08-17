@@ -107,12 +107,25 @@ class KnowledgeNodeViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     serializer_class = KnowledgeNodeSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        # JA: ★所有権の絞り込み(必須、CONVENTIONS.md §1)。DestroyModelMixinの
+        #     destroy()もget_object()経由でこのqueryset越しにしかノードを
+        #     取得できないため、他人のノードを消せない安全性はここ1箇所で担保される。
+        #     削除時の関連レコードの扱いはモデル側のon_deleteで決まる:
+        #       ReviewSchedule(node)   … CASCADE  (葉が消えれば復習記録も消える)
+        #       ChatSession(knowledge_node) … SET_NULL (会話自体は残り、フリーチャット扱いに戻る)
+        # VI: ★Lọc theo chủ sở hữu (bắt buộc, CONVENTIONS.md §1). destroy() của
+        #     DestroyModelMixin cũng chỉ lấy node qua get_object() dựa trên queryset
+        #     này, nên chỉ cần lọc ở đây là đủ để không xóa được node của người khác.
+        #     Cách xử lý bản ghi liên quan khi xóa do on_delete ở model quyết định:
+        #       ReviewSchedule(node)   … CASCADE  (lá mất thì bản ghi ôn tập cũng mất)
+        #       ChatSession(knowledge_node) … SET_NULL (hội thoại vẫn còn, quay về dạng chat tự do)
         return KnowledgeNode.objects.filter(topic__user=self.request.user)
 
     def get_serializer_class(self):

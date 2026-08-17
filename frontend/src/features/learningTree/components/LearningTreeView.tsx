@@ -21,7 +21,6 @@ import type { TreeNode } from '@/shared/types'
 
 import { useLearningTree } from '../api/hooks'
 import { computeRetentionPercent, indexSchedulesByNodeId } from '../lib/mastery'
-import { findAncestorTopicIds } from '../lib/treeFocus'
 import { NodeDetailPanel } from './NodeDetailPanel'
 import { RetentionSummary } from './RetentionSummary'
 import { TopicBranch } from './TopicBranch'
@@ -58,16 +57,6 @@ export function LearningTreeView() {
     () => (tree.data ? filterTree(tree.data, keyword) : []),
     [tree.data, keyword]
   )
-  // JA: ★フォーカスモード用。選択中の葉への経路(祖先Topic)だけを求め、それ以外の
-  //     枝をTopicBranch側で暗く・折りたたむための材料にする。選択が無ければnull
-  //     (フォーカス無効=従来通りの表示)。
-  // VI: ★Dùng cho chế độ focus. Chỉ tìm đường dẫn (Topic tổ tiên) tới lá đang chọn,
-  //     làm nguyên liệu để TopicBranch làm mờ/gấp các nhánh còn lại. Không có lựa
-  //     chọn thì null (tắt chế độ focus, hiển thị như bình thường).
-  const focusedTopicIds = useMemo(
-    () => (selectedNodeId ? findAncestorTopicIds(filtered, selectedNodeId) : null),
-    [filtered, selectedNodeId]
-  )
   const retention = useMemo(
     () => computeRetentionPercent(tree.data ?? [], scheduleByNodeId),
     [tree.data, scheduleByNodeId]
@@ -95,7 +84,17 @@ export function LearningTreeView() {
         />
       </div>
 
-      <div className={`grid gap-4 ${selectedNodeId ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
+      {/* JA: ★lg:items-start が無いと、既定のgrid stretchで詳細パネルが左の木構造列と
+              同じ高さに引き伸ばされる。葉が少なく木構造列が低いと、パネルのフッター
+              (「復習を始める」ボタン)がパネルの見た目の外に押し出されて押せなくなる
+              (NodeDetailPanel側のコメントも参照)。
+              VI: ★Thiếu lg:items-start thì grid stretch mặc định sẽ kéo panel chi tiết
+              cao bằng cột cây bên trái. Cây ít lá thì cột đó thấp, khiến footer của panel
+              (nút "Bắt đầu ôn tập") bị đẩy ra ngoài khung nhìn, không bấm được (xem thêm
+              comment ở NodeDetailPanel). */}
+      <div
+        className={`grid gap-4 ${selectedNodeId ? 'lg:grid-cols-[1fr_360px] lg:items-start' : 'grid-cols-1'}`}
+      >
         <div className="space-y-1 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           {filtered.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-slate-400">{t('common.notFound')}</p>
@@ -108,7 +107,6 @@ export function LearningTreeView() {
                 selectedNodeId={selectedNodeId}
                 onSelectNode={setSelectedNodeId}
                 defaultOpen={keyword.trim().length > 0}
-                focusedTopicIds={focusedTopicIds}
               />
             ))
           )}

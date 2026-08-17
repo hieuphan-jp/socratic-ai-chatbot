@@ -213,18 +213,26 @@ class ClaudeProviderTests(SimpleTestCase):
         _, kwargs = provider.client.messages.create.call_args
         self.assertEqual(kwargs["messages"], [{"role": "user", "content": "dictでも動く？"}])
 
-    def test_empty_messages_sends_single_empty_user_turn(self):
+    def test_empty_messages_sends_single_placeholder_user_turn(self):
+        # JA: Claude APIはuserメッセージのcontentが非空である必要があるため、
+        #     空文字ではなく最小限のプレースホルダーを送る(claude.py参照)。
+        # VI: Claude API yêu cầu content của tin nhắn user không được rỗng,
+        #     nên gửi placeholder tối thiểu thay vì chuỗi rỗng (xem claude.py).
         provider = self._make_provider()
         provider.client.messages.create.return_value = _mock_claude_response("ok")
 
         provider.chat([])
 
         _, kwargs = provider.client.messages.create.call_args
-        self.assertEqual(kwargs["messages"], [{"role": "user", "content": ""}])
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "..."}])
 
-    def test_history_starting_with_assistant_gets_leading_empty_user_turn(self):
-        # JA: Claude APIは最初のメッセージがuserである必要があるため。
-        # VI: Claude API yêu cầu tin nhắn đầu tiên phải là role "user".
+    def test_history_starting_with_assistant_gets_leading_placeholder_user_turn(self):
+        # JA: Claude APIは(1)最初のメッセージがuserであること、(2)userメッセージの
+        #     contentが非空であることの両方を要求する。空文字だと(2)に違反して
+        #     400エラーになるため、非空プレースホルダーを挿入する(claude.py参照)。
+        # VI: Claude API yêu cầu cả (1) tin nhắn đầu phải là user, (2) content của
+        #     tin nhắn user không rỗng. Chuỗi rỗng vi phạm (2) gây lỗi 400, nên
+        #     chèn placeholder không rỗng (xem claude.py).
         provider = self._make_provider()
         provider.client.messages.create.return_value = _mock_claude_response("ok")
 
@@ -234,7 +242,7 @@ class ClaudeProviderTests(SimpleTestCase):
         self.assertEqual(
             kwargs["messages"],
             [
-                {"role": "user", "content": ""},
+                {"role": "user", "content": "..."},
                 {"role": "assistant", "content": "先に来たassistant"},
             ],
         )
@@ -348,18 +356,26 @@ class ClaudeProviderTests(SimpleTestCase):
         _, kwargs = provider.client.messages.create.call_args
         self.assertEqual(kwargs["messages"], [{"role": "user", "content": "dictでも動く？"}])
 
-    def test_empty_messages_sends_single_empty_user_turn(self):
+    def test_empty_messages_sends_single_placeholder_user_turn(self):
+        # JA: Claude APIはuserメッセージのcontentが非空である必要があるため、
+        #     空文字ではなく最小限のプレースホルダーを送る(claude.py参照)。
+        # VI: Claude API yêu cầu content của tin nhắn user không được rỗng,
+        #     nên gửi placeholder tối thiểu thay vì chuỗi rỗng (xem claude.py).
         provider = self._make_provider()
         provider.client.messages.create.return_value = _mock_claude_response("ok")
 
         provider.chat([])
 
         _, kwargs = provider.client.messages.create.call_args
-        self.assertEqual(kwargs["messages"], [{"role": "user", "content": ""}])
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "..."}])
 
-    def test_history_starting_with_assistant_gets_leading_empty_user_turn(self):
-        # JA: Claude APIは最初のメッセージがuserである必要があるため。
-        # VI: Claude API yêu cầu tin nhắn đầu tiên phải là role "user".
+    def test_history_starting_with_assistant_gets_leading_placeholder_user_turn(self):
+        # JA: Claude APIは(1)最初のメッセージがuserであること、(2)userメッセージの
+        #     contentが非空であることの両方を要求する。空文字だと(2)に違反して
+        #     400エラーになるため、非空プレースホルダーを挿入する(claude.py参照)。
+        # VI: Claude API yêu cầu cả (1) tin nhắn đầu phải là user, (2) content của
+        #     tin nhắn user không rỗng. Chuỗi rỗng vi phạm (2) gây lỗi 400, nên
+        #     chèn placeholder không rỗng (xem claude.py).
         provider = self._make_provider()
         provider.client.messages.create.return_value = _mock_claude_response("ok")
 
@@ -369,7 +385,7 @@ class ClaudeProviderTests(SimpleTestCase):
         self.assertEqual(
             kwargs["messages"],
             [
-                {"role": "user", "content": ""},
+                {"role": "user", "content": "..."},
                 {"role": "assistant", "content": "先に来たassistant"},
             ],
         )

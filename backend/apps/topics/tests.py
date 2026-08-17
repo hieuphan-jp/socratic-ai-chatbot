@@ -214,3 +214,55 @@ class OwnershipGatewayTests(TestCase):
     def test_get_owned_topic_rejects_other_users_topic(self):
         with self.assertRaises(NotFound):
             services.get_owned_topic(user=self.other, topic_id=self.topic.id)
+
+
+class KnowledgeNodeDestroyTests(TestCase):
+    """
+    JA: 知識ノードの削除(DELETE /api/knowledge-nodes/{id}/)を検証する。
+        get_queryset の所有権絞り込みだけで安全性を担保しているため、
+        正常系1本と所有権1本(CONVENTIONS.md §13)を確認する。
+    VI: Kiểm tra xóa knowledge node (DELETE /api/knowledge-nodes/{id}/).
+        An toàn chỉ dựa vào việc lọc chủ sở hữu trong get_queryset, nên
+        kiểm tra 1 luồng chính và 1 quyền sở hữu (CONVENTIONS.md §13).
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="owner3", password="pass12345")
+        self.other = User.objects.create_user(username="stranger3", password="pass12345")
+        self.topic = Topic.objects.create(user=self.user, name="数学", position=0)
+        self.node = KnowledgeNode.objects.create(
+            topic=self.topic, title="一次方程式", content="x + 3 = 7"
+        )
+
+    def test_owner_can_delete_own_node(self):
+        self.client.force_login(self.user)
+        resp = self.client.delete(f"/api/knowledge-nodes/{self.node.id}/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(KnowledgeNode.objects.filter(id=self.node.id).exists())
+
+    def test_deleting_node_cascades_review_schedule_but_keeps_chat_session(self):
+        # JA: モデルのon_delete設定(ReviewSchedule=CASCADE、ChatSession=SET_NULL)が
+        #     期待通りに効くことを確かめる回帰テスト。
+        # VI: Test hồi quy xác nhận cấu hình on_delete của model (ReviewSchedule=CASCADE,
+        #     ChatSession=SET_NULL) hoạt động đúng như kỳ vọng.
+        from apps.chat.models import ChatSession
+        from apps.reviews.models import ReviewSchedule
+
+        schedule = ReviewSchedule.objects.create(node=self.node)
+        session = ChatSession.objects.create(
+            user=self.user, title="学習: 一次方程式", knowledge_node=self.node
+        )
+
+        self.client.force_login(self.user)
+        resp = self.client.delete(f"/api/knowledge-nodes/{self.node.id}/")
+        self.assertEqual(resp.status_code, 204)
+
+        self.assertFalse(ReviewSchedule.objects.filter(id=schedule.id).exists())
+        session.refresh_from_db()
+        self.assertIsNone(session.knowledge_node_id)
+
+    def test_cannot_delete_other_users_node(self):
+        self.client.force_login(self.other)
+        resp = self.client.delete(f"/api/knowledge-nodes/{self.node.id}/")
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(KnowledgeNode.objects.filter(id=self.node.id).exists())

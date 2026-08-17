@@ -24,6 +24,11 @@ export const commonMessages = defineMessages({
     'common.search': 'キーワードで検索',
     'common.retry': 'やり直す',
     'common.language': '言語',
+    // JA: {status} はHTTPステータスコード(t の第2引数で渡す)。サーバが detail を
+    //     返さなかった時の通信エラーの既定文言(shared/api/client.ts)。
+    // VI: {status} là mã HTTP status (truyền qua tham số thứ 2 của t). Câu chữ mặc định
+    //     khi server không trả detail (shared/api/client.ts).
+    'common.requestFailed': 'リクエストに失敗しました ({status})',
   },
   vi: {
     'common.loading': 'Đang tải…',
@@ -36,6 +41,7 @@ export const commonMessages = defineMessages({
     'common.search': 'Tìm theo từ khóa',
     'common.retry': 'Thử lại',
     'common.language': 'Ngôn ngữ',
+    'common.requestFailed': 'Yêu cầu thất bại ({status})',
   },
   en: {
     'common.loading': 'Loading…',
@@ -48,5 +54,6 @@ export const commonMessages = defineMessages({
     'common.search': 'Search by keyword',
     'common.retry': 'Retry',
     'common.language': 'Language',
+    'common.requestFailed': 'Request failed ({status})',
   },
 })

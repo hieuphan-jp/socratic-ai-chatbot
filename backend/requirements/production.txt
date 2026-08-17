@@ -1,0 +1,10 @@
+# production.txt
+# JA: 本番運用に必要な依存。base を継承する。AIプロバイダは Claude を使う想定なので
+#     anthropic を含める(local.txt と同じ理由。gemini を使う場合は別途 gemini.txt を参照)。
+# VI: Dependency cần cho vận hành production. Kế thừa base. Giả định dùng Claude làm
+#     AI provider nên có anthropic (lý do giống local.txt; nếu dùng gemini thì xem thêm gemini.txt).
+-r base.txt
+gunicorn~=23.0
+psycopg2-binary~=2.9
+whitenoise~=6.8
+anthropic
