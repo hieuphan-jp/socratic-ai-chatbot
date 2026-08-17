@@ -28,3 +28,15 @@ class LoginSerializer(serializers.Serializer):
 
     username = serializers.CharField()
     password = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+
+class SignupSerializer(serializers.Serializer):
+    """
+    JA: 新規登録入力の検証のみ。ユーザー名の重複チェックやパスワード強度チェックは
+        業務ロジックなので services.py 側で行う(ここは形の検証だけ)。
+    VI: Chỉ kiểm tra hình dạng đầu vào đăng ký. Việc kiểm tra trùng username hay độ
+        mạnh mật khẩu là logic nghiệp vụ nên đặt ở services.py (ở đây chỉ xét hình dạng).
+    """
+
+    username = serializers.CharField(min_length=3, max_length=150)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})

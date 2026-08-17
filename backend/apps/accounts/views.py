@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
-from .serializers import LoginSerializer, UserSerializer
+from .serializers import LoginSerializer, SignupSerializer, UserSerializer
 
 
 class CsrfView(APIView):
@@ -52,6 +52,31 @@ class LoginView(APIView):
 
         # 4) JA: シリアライズして返す / VI: Tuần tự hóa rồi trả về
         return Response(UserSerializer(user).data)
+
+
+class SignupView(APIView):
+    """
+    JA: 新規登録。★聴衆が発表デモで各自アカウントを作り、demo/demo12345の単一共有
+        アカウントによるデータ混在を避けるために追加(LoginViewと対の構造)。
+        未認証でも叩けるよう AllowAny。登録に成功したらそのままログインさせる
+        (登録直後にもう一度ログイン操作をさせるのは demo 利用者への負担が大きいため)。
+    VI: Đăng ký mới. ★Thêm để mỗi khán giả tự tạo tài khoản khi demo thuyết trình,
+        tránh dữ liệu bị trộn lẫn do dùng chung tài khoản demo/demo12345 (cấu trúc
+        đối xứng với LoginView). AllowAny để chưa đăng nhập vẫn gọi được. Đăng ký
+        xong thì đăng nhập luôn (bắt người dùng demo đăng nhập lại lần nữa là phiền).
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = SignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = services.register_user(**serializer.validated_data)
+
+        login(request, user)
+
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
 class LogoutView(APIView):

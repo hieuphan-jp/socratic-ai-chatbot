@@ -12,6 +12,8 @@ VI: Logic nghiệp vụ xác thực. Tầng tách HTTP khỏi views.
 """
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from apps.common.exceptions import ValidationError
 
@@ -33,3 +35,27 @@ def authenticate_user(*, username: str, password: str) -> User:
             "ユーザー名またはパスワードが違います / Sai tên đăng nhập hoặc mật khẩu"
         )
     return user
+
+
+def register_user(*, username: str, password: str) -> User:
+    """
+    JA: ★発表デモでの同時利用向け。聴衆が各自このAPIで自分のアカウントを作り、
+        学習内容ツリー・チャット履歴を他の参加者と分けて使えるようにする
+        (demo/demo12345の単一共有アカウントだと全員のデータが混ざるため追加した)。
+        ユーザー名の重複とパスワード強度(base.pyのAUTH_PASSWORD_VALIDATORS)を
+        ここで検証し、問題なければ User を作成して返す。
+    VI: ★Dùng cho việc nhiều người dùng đồng thời khi demo thuyết trình. Mỗi khán giả
+        tự tạo tài khoản qua API này để tách riêng cây nội dung đã học và lịch sử chat
+        với người khác (thêm vì tài khoản demo/demo12345 dùng chung sẽ làm dữ liệu của
+        tất cả mọi người bị trộn lẫn). Kiểm tra trùng username và độ mạnh mật khẩu
+        (AUTH_PASSWORD_VALIDATORS ở base.py) ở đây; hợp lệ thì tạo User rồi trả về.
+    """
+    if User.objects.filter(username=username).exists():
+        raise ValidationError(
+            "このユーザー名は既に使われています / Tên đăng nhập này đã được sử dụng"
+        )
+    try:
+        validate_password(password)
+    except DjangoValidationError as e:
+        raise ValidationError(" / ".join(e.messages)) from e
+    return User.objects.create_user(username=username, password=password)

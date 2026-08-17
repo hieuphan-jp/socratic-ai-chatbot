@@ -44,6 +44,24 @@ export function useLogin() {
   })
 }
 
+// JA: ★新規登録。発表デモでの同時利用向け(demo/demo12345の単一共有アカウントだと
+//     参加者全員のデータが混ざるため、各自がここで自分のアカウントを作れるようにした)。
+//     成功したらバックエンド側で即ログイン状態になるので、useLoginと同じくmeを差し替える。
+// VI: ★Đăng ký mới. Dùng cho việc nhiều người dùng đồng thời khi demo thuyết trình
+//     (tài khoản demo/demo12345 dùng chung sẽ làm dữ liệu mọi người trộn lẫn, nên cho
+//     mỗi người tự tạo tài khoản riêng ở đây). Thành công thì backend đã tự đăng nhập
+//     luôn, nên cũng thay me giống useLogin.
+export function useSignup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (creds: Credentials) => api.post<User>('/auth/signup/', creds),
+    onSuccess: (user) => {
+      qc.setQueryData(queryKeys.me, user)
+      qc.invalidateQueries({ queryKey: queryKeys.me })
+    },
+  })
+}
+
 export function useLogout() {
   const qc = useQueryClient()
   return useMutation({
