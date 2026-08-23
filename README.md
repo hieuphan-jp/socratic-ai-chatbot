@@ -142,34 +142,6 @@ This creates a learning process centered around active discovery rather than pas
 
 ---
 
-## How to Run
-
-### 1. Install Dependencies
-
-    npm install
-
-### 2. Start the Development Server
-
-    npm run dev
-
-The application will be available at:
-
-    http://localhost:5173/
-
-### 3. Build for Production
-
-    npm run build
-
-### 4. Preview the Production Build
-
-    npm run preview
-
-### 5. Lint the Project
-
-    npm run lint
-
----
-
 ## Project Vision
 
 Chill Education aims to change the way students interact with AI.
