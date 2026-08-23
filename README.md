@@ -83,7 +83,7 @@ The knowledge node's memory level is represented on a scale from 1 to 5. As the 
 
 **(ANH — Knowledge Tree / memory-level visualization)**
 
-![Knowledge Tree - Memory Level Visualization](./images/knowledge-tree.png)
+![Knowledge Tree - Memory Level Visualization](./resources/review.png)
 
 ---
 
